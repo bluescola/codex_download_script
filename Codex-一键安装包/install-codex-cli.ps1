@@ -1,0 +1,725 @@
+param(
+    [switch]$ForceNodeReinstall,
+    [switch]$ForceCodexReinstall,
+    [switch]$SkipCrsConfig
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Write-Info([string]$Message) {
+    Write-Host "[INFO] $Message" -ForegroundColor Cyan
+}
+
+function Write-WarnMsg([string]$Message) {
+    Write-Host "[WARN] $Message" -ForegroundColor Yellow
+}
+
+function Write-Ok([string]$Message) {
+    Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+function Command-Exists([string]$Name) {
+    return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Format-ExitCodeHex([int]$ExitCode) {
+    return ('0x{0:X8}' -f ([uint32]$ExitCode))
+}
+
+function Get-CodexRuntimeHint([int]$ExitCode) {
+    switch ($ExitCode) {
+        -1073741515 {
+            $hint = 'Windows could not start the Codex binary because a required DLL is missing. Install or repair Microsoft Visual C++ Redistributable 2015-2022 (x64), then retry.'
+            $helperScript = Join-Path $PSScriptRoot 'install-vc-redist-x64.cmd'
+            if (Test-Path $helperScript) {
+                $hint += ' You can run install-vc-redist-x64.cmd from this package.'
+            }
+            $hint += ' If the runtime is already installed, inspect antivirus/AppLocker and the native executable under %APPDATA%\npm\node_modules\@openai\codex.'
+            return $hint
+        }
+        default {
+            return $null
+        }
+    }
+}
+
+function New-CodexNativeExitMessage([string]$CommandLabel, [int]$ExitCode, [string]$OutputText) {
+    $message = "$CommandLabel exited with code $ExitCode ($(Format-ExitCodeHex $ExitCode))."
+    if (-not [string]::IsNullOrWhiteSpace($OutputText)) {
+        $message += " Output: $OutputText"
+    }
+
+    $hint = Get-CodexRuntimeHint $ExitCode
+    if (-not [string]::IsNullOrWhiteSpace($hint)) {
+        $message += " $hint"
+    }
+
+    return $message
+}
+
+function Invoke-CodexVersionCommand([string]$CommandPath) {
+    $savedErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $CommandPath --version 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorAction
+    }
+
+    $lines = @(
+        @($output) |
+        ForEach-Object { "$_".Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        ExitCodeHex = (Format-ExitCodeHex $exitCode)
+        Output = $lines
+        OutputText = ($lines -join ' ')
+        Hint = (Get-CodexRuntimeHint $exitCode)
+    }
+}
+
+function New-CodexVersionFailureMessage([string]$CommandLabel, [object]$Result) {
+    if ($Result.ExitCode -ne 0) {
+        return (New-CodexNativeExitMessage $CommandLabel $Result.ExitCode $Result.OutputText)
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Result.OutputText)) {
+        return "$CommandLabel exited with code 0 but returned no version output."
+    }
+
+    return $null
+}
+
+function Refresh-Path {
+    $extraPaths = New-Object System.Collections.Generic.List[string]
+    $nodeInstallDir = Resolve-NodeInstallDir
+    if (-not [string]::IsNullOrWhiteSpace($nodeInstallDir)) {
+        [void]$extraPaths.Add($nodeInstallDir)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+        [void]$extraPaths.Add("$env:ProgramFiles\nodejs")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        [void]$extraPaths.Add("$env:APPDATA\npm")
+    }
+
+    $current = $env:Path -split ';'
+    foreach ($p in @($extraPaths | Select-Object -Unique)) {
+        if ((Test-Path $p) -and -not ($current -contains $p)) {
+            $env:Path = "$env:Path;$p"
+        }
+    }
+}
+
+function Ensure-UserPathContains([string]$PathEntry) {
+    if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+        return
+    }
+
+    $normalizedEntry = $PathEntry.Trim().TrimEnd('\')
+    if (-not (Test-Path $normalizedEntry)) {
+        return
+    }
+
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $parts = @()
+    if (-not [string]::IsNullOrWhiteSpace($userPath)) {
+        $parts = $userPath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    }
+
+    $exists = $false
+    foreach ($p in $parts) {
+        if ($p.Trim().TrimEnd('\') -ieq $normalizedEntry) {
+            $exists = $true
+            break
+        }
+    }
+
+    if (-not $exists) {
+        $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) {
+            $normalizedEntry
+        } else {
+            "$userPath;$normalizedEntry"
+        }
+        [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+        Write-Info "Added to USER PATH: $normalizedEntry"
+    }
+}
+
+function Resolve-NpmGlobalBinDir {
+    try {
+        $prefix = (& npm config get prefix).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($prefix)) {
+            return $prefix
+        }
+    }
+    catch {
+    }
+
+    return (Join-Path $env:APPDATA 'npm')
+}
+
+function Resolve-NodeInstallDir {
+    $nodeCmd = @(Get-Command node -All -ErrorAction SilentlyContinue |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_.Path) } |
+        Select-Object -First 1)
+    if ($nodeCmd.Count -gt 0) {
+        $resolvedDir = Split-Path -Parent $nodeCmd[0].Path
+        if (-not [string]::IsNullOrWhiteSpace($resolvedDir) -and (Test-Path (Join-Path $resolvedDir 'node.exe'))) {
+            return $resolvedDir
+        }
+    }
+
+    if (Test-Path 'C:\Program Files\nodejs\node.exe') {
+        return 'C:\Program Files\nodejs'
+    }
+
+    $alt = Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
+    if (Test-Path (Join-Path $alt 'node.exe')) {
+        return $alt
+    }
+
+    return $null
+}
+
+function Backup-FileIfExists([string]$PathToBackup) {
+    if (-not (Test-Path $PathToBackup)) {
+        return
+    }
+
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $backupPath = "$PathToBackup.bak.$timestamp"
+    Copy-Item -Path $PathToBackup -Destination $backupPath -Force
+    Write-Info "Backed up existing file: $backupPath"
+}
+
+function Read-RequiredInput([string]$Prompt) {
+    while ($true) {
+        $value = (Read-Host $Prompt).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+        Write-WarnMsg 'Input cannot be empty. Please try again.'
+    }
+}
+
+function Read-SecretInput([string]$Prompt) {
+    while ($true) {
+        $secure = Read-Host $Prompt -AsSecureString
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        try {
+            $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        }
+        finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($plain)) {
+            return $plain.Trim()
+        }
+        Write-WarnMsg 'Input cannot be empty. Please try again.'
+    }
+}
+
+function Node-And-Npm-Ready {
+    return (Command-Exists 'node') -and (Command-Exists 'npm')
+}
+
+function Install-Winget-FromModule {
+    Write-Info "winget not found. Trying Microsoft.WinGet.Client..."
+
+    $progressPreference = 'silentlyContinue'
+    Install-PackageProvider -Name NuGet -Force | Out-Null
+
+    if (-not (Get-Module -ListAvailable -Name Microsoft.WinGet.Client)) {
+        Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null
+    }
+
+    Import-Module Microsoft.WinGet.Client -ErrorAction SilentlyContinue
+
+    if (Get-Command Repair-WinGetPackageManager -ErrorAction SilentlyContinue) {
+        Repair-WinGetPackageManager -AllUsers | Out-Null
+    }
+}
+
+function Install-Winget-FromMsix {
+    Write-Info "Trying App Installer package for winget..."
+    $pkg = Join-Path $env:TEMP 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle'
+    Invoke-WebRequest -Uri 'https://aka.ms/getwinget' -OutFile $pkg
+    Add-AppxPackage -Path $pkg
+}
+
+function Ensure-Winget {
+    if (Command-Exists 'winget') {
+        return
+    }
+
+    try {
+        Install-Winget-FromModule
+    }
+    catch {
+        Write-WarnMsg "Module-based winget install failed: $($_.Exception.Message)"
+    }
+
+    if (Command-Exists 'winget') {
+        return
+    }
+
+    try {
+        Install-Winget-FromMsix
+    }
+    catch {
+        Write-WarnMsg "MSIX-based winget install failed: $($_.Exception.Message)"
+    }
+}
+
+function Install-Node-WithWinget {
+    Write-Info "Installing Node.js LTS with winget..."
+    & winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent
+    if ($LASTEXITCODE -ne 0) {
+        throw "winget exited with code $LASTEXITCODE"
+    }
+}
+
+function Install-Node-WithMsi {
+    Write-Info "Falling back to direct MSI install for Node.js LTS..."
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    $idx = Invoke-RestMethod 'https://nodejs.org/dist/index.json'
+    $lts = $idx | Where-Object { $_.lts -and ($_.files -contains 'win-x64-msi') } | Select-Object -First 1
+
+    if (-not $lts) {
+        throw 'Could not resolve a Node.js LTS x64 MSI from nodejs.org'
+    }
+
+    $url = "https://nodejs.org/dist/$($lts.version)/node-$($lts.version)-x64.msi"
+    $msi = Join-Path $env:TEMP 'node-lts-x64.msi'
+
+    Invoke-WebRequest -Uri $url -OutFile $msi
+    Start-Process msiexec.exe -Wait -ArgumentList "/i `"$msi`" /passive /norestart"
+}
+
+function Ensure-Node {
+    if ((Node-And-Npm-Ready) -and -not $ForceNodeReinstall) {
+        Write-Info "Node.js and npm already present."
+        return
+    }
+
+    Ensure-Winget
+
+    if (Command-Exists 'winget') {
+        try {
+            Install-Node-WithWinget
+        }
+        catch {
+            Write-WarnMsg "winget Node.js install failed: $($_.Exception.Message)"
+            Write-WarnMsg "Trying MSI fallback..."
+        }
+    }
+
+    Refresh-Path
+
+    if (-not (Node-And-Npm-Ready)) {
+        Install-Node-WithMsi
+        Refresh-Path
+    }
+
+    if (-not (Node-And-Npm-Ready)) {
+        throw 'Node.js/npm still not available. Reopen PowerShell and retry.'
+    }
+
+    $nodeInstallDir = Resolve-NodeInstallDir
+    if ($nodeInstallDir) {
+        Ensure-UserPathContains $nodeInstallDir
+        if (-not (($env:Path -split ';') -contains $nodeInstallDir)) {
+            $env:Path = "$env:Path;$nodeInstallDir"
+        }
+    }
+
+    Write-Ok "Node.js: $(node -v)"
+    Write-Ok "npm: $(npm -v)"
+}
+
+function Invoke-PowerShellCodexProbe {
+    param(
+        [switch]$NoProfile
+    )
+
+    if (-not (Get-Command powershell.exe -ErrorAction SilentlyContinue)) {
+        return -1
+    }
+
+    $probe = @'
+$ErrorActionPreference = "Stop"
+try {
+    Get-Command codex -ErrorAction Stop | Out-Null
+    codex --version | Out-Null
+    $nativeExit = $LASTEXITCODE
+    if ($nativeExit -ne 0) {
+        Write-Output ("ProbeNativeExit: " + $nativeExit)
+        exit $nativeExit
+    }
+    exit 0
+}
+catch [System.Management.Automation.CommandNotFoundException] {
+    Write-Output "ProbeErrorType: CommandNotFoundException"
+    Write-Output ("ProbeMessage: " + $_.Exception.Message)
+    exit 12
+}
+catch [System.Management.Automation.PSSecurityException] {
+    Write-Output "ProbeErrorType: PSSecurityException"
+    Write-Output ("ProbeMessage: " + $_.Exception.Message)
+    if ($_.FullyQualifiedErrorId) {
+        Write-Output ("ProbeFQID: " + $_.FullyQualifiedErrorId)
+    }
+    exit 13
+}
+catch {
+    Write-Output ("ProbeErrorType: " + $_.Exception.GetType().FullName)
+    Write-Output ("ProbeMessage: " + $_.Exception.Message)
+    if ($_.FullyQualifiedErrorId) {
+        Write-Output ("ProbeFQID: " + $_.FullyQualifiedErrorId)
+    }
+    if ($_.CategoryInfo) {
+        Write-Output ("ProbeCategory: " + $_.CategoryInfo.ToString())
+    }
+    exit 14
+}
+'@
+
+    $probeBytes = [System.Text.Encoding]::Unicode.GetBytes($probe)
+    $probeEncoded = [Convert]::ToBase64String($probeBytes)
+
+    # The installer itself runs with -ExecutionPolicy Bypass.
+    # Remove this process override temporarily so the probe reflects a normal PowerShell session.
+    $hadPref = Test-Path Env:PSExecutionPolicyPreference
+    $savedPref = $null
+    if ($hadPref) {
+        $savedPref = $env:PSExecutionPolicyPreference
+        Remove-Item Env:PSExecutionPolicyPreference -ErrorAction SilentlyContinue
+    }
+
+    $savedErrorAction = $ErrorActionPreference
+    try {
+        # Probe failures should be logged, not terminate installer execution.
+        $ErrorActionPreference = 'Continue'
+        $probeArgs = @()
+        if ($NoProfile) {
+            $probeArgs += '-NoProfile'
+        }
+        $probeArgs += @('-EncodedCommand', $probeEncoded)
+
+        $probeOutput = & powershell.exe @probeArgs 2>&1
+        $probeExit = $LASTEXITCODE
+        $probeLabel = if ($NoProfile) { 'NoProfile' } else { 'Normal' }
+
+        foreach ($line in @($probeOutput)) {
+            $text = "$line".Trim()
+            if (-not [string]::IsNullOrWhiteSpace($text)) {
+                Write-WarnMsg "[Probe][$probeLabel] $text"
+            }
+        }
+
+        return $probeExit
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorAction
+        if ($hadPref) {
+            $env:PSExecutionPolicyPreference = $savedPref
+        }
+    }
+}
+
+function Disable-CodexPs1Wrapper([string]$CodexPs1Path) {
+    if ([string]::IsNullOrWhiteSpace($CodexPs1Path) -or -not (Test-Path $CodexPs1Path)) {
+        return $false
+    }
+
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $disabledPath = "$CodexPs1Path.disabled.$timestamp"
+    Rename-Item -Path $CodexPs1Path -NewName (Split-Path -Leaf $disabledPath) -Force
+    Write-WarnMsg "Disabled codex.ps1 wrapper due to policy restriction: $disabledPath"
+    return $true
+}
+
+function Ensure-CodexCommandWorks([string]$NpmBinDir) {
+    $codexCmd = Join-Path $NpmBinDir 'codex.cmd'
+    $codexPs1 = Join-Path $NpmBinDir 'codex.ps1'
+
+    if (-not (Test-Path $codexCmd)) {
+        if (Test-Path $codexPs1) {
+            throw "codex.ps1 exists but codex.cmd is missing: $codexPs1"
+        }
+        throw "codex executable files not found under npm bin: $NpmBinDir"
+    }
+
+    try {
+        $cmdResult = Invoke-CodexVersionCommand $codexCmd
+    }
+    catch {
+        throw "codex.cmd exists but failed to execute: $($_.Exception.Message)"
+    }
+
+    $cmdFailure = New-CodexVersionFailureMessage 'codex.cmd' $cmdResult
+    if ($cmdFailure) {
+        throw $cmdFailure
+    }
+
+    Write-Ok "Codex CLI installed (via codex.cmd): $($cmdResult.OutputText)"
+
+    $profileProbeCode = Invoke-PowerShellCodexProbe
+    if ($profileProbeCode -eq 13) {
+        Write-WarnMsg "A normal PowerShell session blocks codex.ps1 due to execution policy."
+        Write-WarnMsg ("ExecutionPolicy(CurrentUser): " + (Get-ExecutionPolicy -Scope CurrentUser))
+        Write-WarnMsg ("ExecutionPolicy(UserPolicy): " + (Get-ExecutionPolicy -Scope UserPolicy))
+        Write-WarnMsg ("ExecutionPolicy(MachinePolicy): " + (Get-ExecutionPolicy -Scope MachinePolicy))
+
+        # Try standard fix first.
+        try {
+            $policy = Get-ExecutionPolicy -Scope CurrentUser
+            if ($policy -in @('Undefined', 'Restricted', 'AllSigned')) {
+                Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+                Write-Info "Set CurrentUser execution policy to RemoteSigned."
+            }
+        }
+        catch {
+            Write-WarnMsg "Could not set execution policy automatically: $($_.Exception.Message)"
+        }
+
+        $probeAfterPolicy = Invoke-PowerShellCodexProbe
+        if ($probeAfterPolicy -eq 0) {
+            $profileProbeCode = 0
+        }
+        else {
+            $profileProbeCode = $probeAfterPolicy
+        }
+
+        if (($profileProbeCode -eq 13) -and (Test-Path $codexPs1)) {
+            if (Disable-CodexPs1Wrapper $codexPs1) {
+                $probeAfterWrapper = Invoke-PowerShellCodexProbe
+                if ($probeAfterWrapper -eq 0) {
+                    $profileProbeCode = 0
+                }
+                else {
+                    $profileProbeCode = $probeAfterWrapper
+                    Write-WarnMsg "codex.ps1 wrapper was disabled, but the normal PowerShell probe still failed with code $probeAfterWrapper."
+                }
+            }
+        }
+    }
+    elseif ($profileProbeCode -eq 12) {
+        Write-WarnMsg 'A normal PowerShell session does not resolve `codex` yet. Reopen PowerShell after install if needed.'
+    }
+    elseif ($profileProbeCode -eq -1) {
+        Write-WarnMsg 'powershell.exe was not found for the normal PowerShell probe.'
+    }
+    elseif ($profileProbeCode -eq 14) {
+        Write-WarnMsg 'Normal PowerShell probe failed with an exception.'
+    }
+    elseif ($profileProbeCode -ne 0) {
+        Write-WarnMsg "Normal PowerShell probe failed with exit code $profileProbeCode."
+    }
+
+    if ($profileProbeCode -eq 0) {
+        Write-Ok 'Codex command is ready in a normal PowerShell session.'
+    }
+
+    $noProfileProbeCode = Invoke-PowerShellCodexProbe -NoProfile
+    if ($noProfileProbeCode -eq 0) {
+        Write-Ok 'Codex command is also ready in PowerShell -NoProfile.'
+    }
+    elseif ($noProfileProbeCode -eq 12) {
+        Write-WarnMsg 'PowerShell -NoProfile does not resolve `codex`. This is usually a PATH propagation issue until a new shell is opened.'
+    }
+    elseif ($noProfileProbeCode -eq 13) {
+        Write-WarnMsg 'PowerShell -NoProfile still blocks codex.ps1 due to execution policy.'
+    }
+    elseif ($noProfileProbeCode -eq -1) {
+        Write-WarnMsg 'powershell.exe was not found for the PowerShell -NoProfile probe.'
+    }
+    elseif ($noProfileProbeCode -eq 14) {
+        Write-WarnMsg 'PowerShell -NoProfile probe failed with an exception.'
+    }
+    else {
+        Write-WarnMsg "PowerShell -NoProfile probe failed with exit code $noProfileProbeCode."
+    }
+
+    if ($profileProbeCode -eq 0) {
+        return
+    }
+
+    if ($profileProbeCode -eq 12) {
+        Write-WarnMsg 'Installation completed, but a freshly opened PowerShell window may be required before `codex` resolves normally.'
+        return
+    }
+
+    if ($noProfileProbeCode -eq 0) {
+        Write-WarnMsg 'Installation completed, but your normal PowerShell profile or startup scripts appear to interfere with `codex`.'
+        return
+    }
+
+    # Last-resort guidance: codex.cmd works, but normal PowerShell still not healthy.
+    try {
+        $cmdResult = Invoke-CodexVersionCommand $codexCmd
+        $cmdFailure = New-CodexVersionFailureMessage 'codex.cmd' $cmdResult
+        if ($cmdFailure) {
+            Write-WarnMsg $cmdFailure
+        }
+        else {
+            Write-WarnMsg "A normal PowerShell session is still not ready (probe code: $profileProbeCode). codex.cmd works: $($cmdResult.OutputText)"
+        }
+    }
+    catch {
+        Write-WarnMsg "codex.cmd fallback also failed: $($_.Exception.Message)"
+    }
+
+    throw "Codex installed but still unavailable in a normal PowerShell session. Reopen PowerShell and retry, or run codex.cmd."
+}
+
+
+function Install-CodexPackage {
+    Write-Info 'Installing Codex CLI...'
+    & npm i -g @openai/codex
+    $installExit = $LASTEXITCODE
+    if ($installExit -eq 0) {
+        return
+    }
+
+    $logDir = Join-Path $env:LOCALAPPDATA 'npm-cache\_logs'
+    $latestLog = $null
+    if (Test-Path $logDir) {
+        $latestLog = Get-ChildItem -Path $logDir -Filter '*-debug-0.log' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+    }
+
+    Write-WarnMsg "npm install returned exit code $installExit."
+    if ($latestLog) {
+        Write-WarnMsg "npm debug log: $($latestLog.FullName)"
+    }
+
+    Write-WarnMsg 'Detected npm install failure. Retrying once after stopping codex process...'
+    Get-Process -Name codex -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+
+    & npm i -g @openai/codex
+    $retryExit = $LASTEXITCODE
+    if ($retryExit -ne 0) {
+        throw "npm install -g @openai/codex failed (exit $retryExit). Close terminals/tools using codex.exe and retry."
+    }
+}
+
+function Ensure-Codex {
+
+    if ($ForceCodexReinstall) {
+        Write-Info 'Force reinstall requested: uninstalling existing Codex CLI...'
+        npm uninstall -g @openai/codex | Out-Null
+    }
+
+    $existingCodexVersion = $null
+    if (-not $ForceCodexReinstall) {
+        try {
+            $existingVersionResult = Invoke-CodexVersionCommand 'codex.cmd'
+            $existingVersionFailure = New-CodexVersionFailureMessage 'codex.cmd' $existingVersionResult
+            if (-not $existingVersionFailure) {
+                $existingCodexVersion = $existingVersionResult.OutputText.Trim()
+            }
+            else {
+                Write-WarnMsg "Existing Codex CLI probe failed: $existingVersionFailure Reinstalling package."
+                $existingCodexVersion = $null
+            }
+        }
+        catch {
+            $existingCodexVersion = $null
+        }
+    }
+
+    if ($existingCodexVersion) {
+        Write-Info "Codex CLI already present: $existingCodexVersion"
+    }
+    else {
+        Install-CodexPackage
+    }
+
+    $npmBinDir = Resolve-NpmGlobalBinDir
+    Ensure-UserPathContains $npmBinDir
+    $nodeInstallDir = Resolve-NodeInstallDir
+    if ($nodeInstallDir) {
+        Ensure-UserPathContains $nodeInstallDir
+    }
+
+    if (-not (($env:Path -split ';') -contains $npmBinDir)) {
+        $env:Path = "$env:Path;$npmBinDir"
+    }
+    if ($nodeInstallDir -and -not (($env:Path -split ';') -contains $nodeInstallDir)) {
+        $env:Path = "$env:Path;$nodeInstallDir"
+    }
+    Refresh-Path
+
+    Ensure-CodexCommandWorks $npmBinDir
+}
+
+function Configure-CrsFiles {
+    $codexDir = Join-Path $env:USERPROFILE '.codex'
+    $configPath = Join-Path $codexDir 'config.toml'
+    $authPath = Join-Path $codexDir 'auth.json'
+
+    Write-Info 'Starting CRS configuration...'
+    Write-Info 'Please provide values for base_url and CRS_OAI_KEY.'
+
+    $baseUrl = Read-RequiredInput 'Enter CRS base_url (example: http://x.x.x.x:10086/openai)'
+    $crsKey = Read-SecretInput 'Enter CRS_OAI_KEY (input hidden)'
+
+    New-Item -ItemType Directory -Path $codexDir -Force | Out-Null
+    Backup-FileIfExists $configPath
+    Backup-FileIfExists $authPath
+
+    $configToml = @"
+model_provider = "crs"
+model = "gpt-5.1-codex-max"
+model_reasoning_effort = "high"
+disable_response_storage = true
+preferred_auth_method = "apikey"
+
+[model_providers.crs]
+name = "crs"
+base_url = "$baseUrl"
+wire_api = "responses"
+requires_openai_auth = false
+env_key = "CRS_OAI_KEY"
+"@
+
+    $authJson = @"
+{
+  "OPENAI_API_KEY": null
+}
+"@
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($configPath, $configToml, $utf8NoBom)
+    [System.IO.File]::WriteAllText($authPath, $authJson, $utf8NoBom)
+
+    [Environment]::SetEnvironmentVariable('CRS_OAI_KEY', $crsKey, 'User')
+    $env:CRS_OAI_KEY = $crsKey
+
+    Write-Ok "Wrote config file: $configPath"
+    Write-Ok "Wrote auth file: $authPath"
+    Write-Ok 'Saved CRS_OAI_KEY to USER environment variables.'
+}
+
+Write-Info 'Starting install for Codex CLI and dependencies...'
+Ensure-Node
+Ensure-Codex
+
+if (-not $SkipCrsConfig) {
+    Configure-CrsFiles
+}
+
+Write-Host ''
+Write-Host 'Done. If your current shell does not see new PATH/env values, reopen PowerShell.' -ForegroundColor White

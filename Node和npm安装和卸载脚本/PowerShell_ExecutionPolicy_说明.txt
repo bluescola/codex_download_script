@@ -1,0 +1,27 @@
+PowerShell 执行策略查看与恢复说明
+
+一、查看当前用户级策略
+命令：
+  Get-ExecutionPolicy -Scope CurrentUser
+作用：
+  仅查看当前用户（CurrentUser）作用域的执行策略。该值会覆盖机器级默认策略。
+
+二、查看所有作用域的策略
+命令：
+  Get-ExecutionPolicy -List
+作用：
+  一次性列出所有作用域（MachinePolicy、UserPolicy、Process、CurrentUser、LocalMachine）当前的执行策略。
+  便于判断到底是哪一层策略在生效。
+
+三、恢复 CurrentUser 到“原状”
+命令：
+  Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Undefined
+作用：
+  清除当前用户层面的策略覆盖，让它回退到系统默认（通常由 LocalMachine 决定）。
+  也就是说，CurrentUser 不再强制指定策略。
+
+补充说明：
+- Undefined 不等于 Restricted，它表示“未设置”。真正生效的值会从更高优先级的作用域继承。
+- 如果你想显式回到 Restricted，可用：
+    Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Restricted
+- 如果脚本运行提示权限问题，临时用 RemoteSigned，测试完再恢复为 Undefined。
