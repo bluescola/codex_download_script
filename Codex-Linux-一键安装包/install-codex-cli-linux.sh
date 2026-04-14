@@ -3,6 +3,7 @@ set -euo pipefail
 
 FORCE_NODE_REINSTALL=0
 FORCE_CODEX_REINSTALL=0
+REMOVE_SYSTEM_CODEX=0
 SKIP_CRS_CONFIG=0
 
 while [[ $# -gt 0 ]]; do
@@ -13,6 +14,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --force-codex-reinstall)
       FORCE_CODEX_REINSTALL=1
+      shift
+      ;;
+    --remove-system-codex)
+      REMOVE_SYSTEM_CODEX=1
       shift
       ;;
     --skip-crs-config)
@@ -26,6 +31,7 @@ Usage: install-codex-cli-linux.sh [options]
 Options:
   --force-node-reinstall   Force reinstall Node.js/npm
   --force-codex-reinstall  Force reinstall @openai/codex
+  --remove-system-codex    Remove system-level @openai/codex (e.g. /usr/lib/node_modules)
   --skip-crs-config        Skip interactive CRS config generation
   -h, --help               Show this help
 USAGE
@@ -71,6 +77,8 @@ read_required() {
   local value=''
   while true; do
     read -r -p "$prompt" value
+    # Trim whitespace and drop control chars to avoid breaking sed/exports.
+    value="$(printf '%s' "$value" | tr -d '\000-\037\177')"
     value="${value#${value%%[![:space:]]*}}"
     value="${value%${value##*[![:space:]]}}"
     if [[ -n "$value" ]]; then
@@ -87,6 +95,10 @@ read_secret_required() {
   while true; do
     read -r -s -p "$prompt" value
     printf '\n'
+    # Drop control chars (arrow keys, etc) and trim whitespace.
+    value="$(printf '%s' "$value" | tr -d '\000-\037\177')"
+    value="${value#${value%%[![:space:]]*}}"
+    value="${value%${value##*[![:space:]]}}"
     if [[ -n "$value" ]]; then
       printf '%s' "$value"
       return 0
@@ -145,53 +157,124 @@ ensure_node_npm() {
   log_ok "npm: $(npm -v)"
 }
 
+upsert_path_block() {
+  local file="$1"
+  local block_start="$2"
+  local block_end="$3"
+  local line="$4"
+
+  if [[ ! -f "$file" ]]; then
+    touch "$file"
+  fi
+
+  if grep -qF "$block_start" "$file"; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v start="$block_start" -v end="$block_end" -v line="$line" '
+      $0==start {print start; print line; print end; inblock=1; next}
+      $0==end {inblock=0; next}
+      !inblock {print}
+    ' "$file" > "$tmp"
+    mv "$tmp" "$file"
+  else
+    printf '\n%s\n%s\n%s\n' "$block_start" "$line" "$block_end" >> "$file"
+  fi
+}
+
+ensure_user_npm_prefix() {
+  local user_prefix="$HOME/.npm-global"
+  local npm_prefix
+  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+
+  mkdir -p "$user_prefix"
+
+  if [[ "$npm_prefix" != "$user_prefix" ]]; then
+    log_info "Setting npm global prefix to user directory: $user_prefix"
+    npm config set prefix "$user_prefix"
+  fi
+
+  local npm_bin="${user_prefix%/}/bin"
+  export PATH="$npm_bin:$PATH"
+
+  local block_start="# >>> codex user paths >>>"
+  local block_end="# <<< codex user paths <<<"
+  local line="export PATH=\"$npm_bin:\$PATH\""
+
+  upsert_path_block "$HOME/.bashrc" "$block_start" "$block_end" "$line"
+  upsert_path_block "$HOME/.zshrc" "$block_start" "$block_end" "$line"
+
+  log_ok "npm prefix: $(npm config get prefix)"
+  log_ok "Ensured PATH includes: $npm_bin"
+}
+
 ensure_codex() {
-  local use_sudo=''
+  local npm_prefix npm_bin
+  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  npm_bin="${npm_prefix%/}/bin"
 
   if [[ "$FORCE_CODEX_REINSTALL" -eq 1 ]]; then
-    log_info "Force reinstall enabled: removing existing Codex CLI..."
-    if npm uninstall -g @openai/codex >/dev/null 2>&1; then
-      :
-    else
-      use_sudo="$(need_sudo)"
-      ${use_sudo}npm uninstall -g @openai/codex >/dev/null 2>&1 || true
-    fi
+    log_info "Force reinstall enabled: removing existing Codex CLI in user prefix..."
+    npm uninstall -g @openai/codex >/dev/null 2>&1 || true
   else
-    if cmd_exists codex; then
-      if codex --version >/dev/null 2>&1; then
-        log_info "Codex CLI already installed: $(codex --version)"
+    if [[ -x "$npm_bin/codex" ]]; then
+      if "$npm_bin/codex" --version >/dev/null 2>&1; then
+        log_info "Codex CLI already installed in user prefix: $($npm_bin/codex --version)"
         return 0
       fi
-      log_warn "codex exists but failed to run; will reinstall."
+      log_warn "codex exists in user prefix but failed to run; will reinstall."
     fi
   fi
 
-  log_info "Installing Codex CLI..."
+  log_info "Installing Codex CLI to user prefix ($npm_prefix)..."
   if npm i -g @openai/codex >/dev/null 2>&1; then
     :
   else
-    use_sudo="$(need_sudo)"
-    ${use_sudo}npm i -g @openai/codex >/dev/null
+    echo "[ERROR] npm install -g @openai/codex failed in user prefix. Check npm prefix and permissions." >&2
+    exit 1
   fi
 
-  if cmd_exists codex; then
-    log_ok "Codex CLI: $(codex --version)"
-    return 0
-  fi
-
-  # Fallback discovery from npm global bin dir.
-  local npm_prefix npm_bin
   npm_prefix="$(npm config get prefix 2>/dev/null || true)"
   npm_bin="${npm_prefix%/}/bin"
   if [[ -x "$npm_bin/codex" ]]; then
     log_ok "Codex CLI: $($npm_bin/codex --version)"
-    log_warn "codex is not in current PATH. Add this to your shell profile:"
+  else
+    echo "[ERROR] codex command not found under npm prefix after installation." >&2
+    exit 1
+  fi
+
+  if cmd_exists codex; then
+    local resolved
+    resolved="$(command -v codex)"
+    if [[ "$resolved" != "$npm_bin/codex" ]]; then
+      log_warn "PATH resolves codex to: $resolved"
+      log_warn "Expected user prefix: $npm_bin/codex"
+      log_warn "Open a new shell or ensure PATH has $npm_bin first."
+    fi
+  else
+    log_warn "codex is not in current PATH. Open a new shell or add this to your shell profile:"
     printf 'export PATH="%s:$PATH"\n' "$npm_bin"
+  fi
+}
+
+remove_system_codex() {
+  local use_sudo
+  local found=0
+
+  # Common system-level npm global locations.
+  if [[ -d "/usr/lib/node_modules/@openai/codex" ]]; then
+    found=1
+  elif [[ -d "/usr/local/lib/node_modules/@openai/codex" ]]; then
+    found=1
+  fi
+
+  if [[ "$found" -eq 0 ]]; then
+    log_info "No system-level Codex CLI found under /usr or /usr/local."
     return 0
   fi
 
-  echo "[ERROR] codex command not found after installation." >&2
-  exit 1
+  log_info "Removing system-level Codex CLI with sudo..."
+  use_sudo="$(need_sudo)"
+  ${use_sudo}npm uninstall -g @openai/codex >/dev/null 2>&1 || true
 }
 
 upsert_env_in_file() {
@@ -203,11 +286,25 @@ upsert_env_in_file() {
     touch "$file"
   fi
 
-  if grep -qE "^[[:space:]]*export[[:space:]]+${key}=" "$file"; then
-    sed -i -E "s|^[[:space:]]*export[[:space:]]+${key}=.*$|export ${key}=\"${value//|/\\|}\"|" "$file"
-  else
-    printf '\nexport %s="%s"\n' "$key" "$value" >> "$file"
+  local tmp found
+  tmp="$(mktemp)"
+  found=0
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*export[[:space:]]+${key}= ]]; then
+      if [[ "$found" -eq 0 ]]; then
+        printf 'export %s="%s"\n' "$key" "$value" >> "$tmp"
+        found=1
+      fi
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+
+  if [[ "$found" -eq 0 ]]; then
+    printf '\nexport %s="%s"\n' "$key" "$value" >> "$tmp"
   fi
+
+  mv "$tmp" "$file"
 }
 
 configure_crs() {
@@ -259,6 +356,10 @@ AUTH
 main() {
   log_info "Starting one-click install for Linux Codex CLI package..."
   ensure_node_npm
+  if [[ "$REMOVE_SYSTEM_CODEX" -eq 1 ]]; then
+    remove_system_codex
+  fi
+  ensure_user_npm_prefix
   ensure_codex
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
