@@ -6,6 +6,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$UserNodeRoot = if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    Join-Path $env:USERPROFILE '.local\node'
+} else {
+    Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
+}
 
 function Write-Info([string]$Message) {
     Write-Host "[INFO] $Message" -ForegroundColor Cyan
@@ -98,6 +103,9 @@ function New-CodexVersionFailureMessage([string]$CommandLabel, [object]$Result) 
 
 function Refresh-Path {
     $extraPaths = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($UserNodeRoot)) {
+        [void]$extraPaths.Add($UserNodeRoot)
+    }
     $nodeInstallDir = Resolve-NodeInstallDir
     if (-not [string]::IsNullOrWhiteSpace($nodeInstallDir)) {
         [void]$extraPaths.Add($nodeInstallDir)
@@ -165,7 +173,32 @@ function Resolve-NpmGlobalBinDir {
     return (Join-Path $env:APPDATA 'npm')
 }
 
+function Ensure-NpmUserPrefix {
+    if ([string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        return
+    }
+
+    $target = Join-Path $env:APPDATA 'npm'
+    $current = $null
+    try {
+        $current = (& npm config get prefix).Trim()
+    }
+    catch {
+    }
+
+    if ([string]::IsNullOrWhiteSpace($current) -or ($current -ne $target)) {
+        & npm config set prefix $target | Out-Null
+        Write-Info "Set npm prefix to user directory: $target"
+    }
+}
+
 function Resolve-NodeInstallDir {
+    if (-not [string]::IsNullOrWhiteSpace($UserNodeRoot)) {
+        if (Test-Path (Join-Path $UserNodeRoot 'node.exe')) {
+            return $UserNodeRoot
+        }
+    }
+
     $nodeCmd = @(Get-Command node -All -ErrorAction SilentlyContinue |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_.Path) } |
         Select-Object -First 1)
@@ -178,11 +211,6 @@ function Resolve-NodeInstallDir {
 
     if (Test-Path 'C:\Program Files\nodejs\node.exe') {
         return 'C:\Program Files\nodejs'
-    }
-
-    $alt = Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
-    if (Test-Path (Join-Path $alt 'node.exe')) {
-        return $alt
     }
 
     return $null
@@ -228,122 +256,87 @@ function Read-SecretInput([string]$Prompt) {
 }
 
 function Node-And-Npm-Ready {
-    return (Command-Exists 'node') -and (Command-Exists 'npm')
+    if ([string]::IsNullOrWhiteSpace($UserNodeRoot)) {
+        return $false
+    }
+
+    return (Test-Path (Join-Path $UserNodeRoot 'node.exe')) -and (Test-Path (Join-Path $UserNodeRoot 'npm.cmd'))
 }
 
-function Install-Winget-FromModule {
-    Write-Info "winget not found. Trying Microsoft.WinGet.Client..."
-
-    $progressPreference = 'silentlyContinue'
-    Install-PackageProvider -Name NuGet -Force | Out-Null
-
-    if (-not (Get-Module -ListAvailable -Name Microsoft.WinGet.Client)) {
-        Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null
-    }
-
-    Import-Module Microsoft.WinGet.Client -ErrorAction SilentlyContinue
-
-    if (Get-Command Repair-WinGetPackageManager -ErrorAction SilentlyContinue) {
-        Repair-WinGetPackageManager -AllUsers | Out-Null
-    }
-}
-
-function Install-Winget-FromMsix {
-    Write-Info "Trying App Installer package for winget..."
-    $pkg = Join-Path $env:TEMP 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle'
-    Invoke-WebRequest -Uri 'https://aka.ms/getwinget' -OutFile $pkg
-    Add-AppxPackage -Path $pkg
-}
-
-function Ensure-Winget {
-    if (Command-Exists 'winget') {
-        return
-    }
-
-    try {
-        Install-Winget-FromModule
-    }
-    catch {
-        Write-WarnMsg "Module-based winget install failed: $($_.Exception.Message)"
-    }
-
-    if (Command-Exists 'winget') {
-        return
-    }
-
-    try {
-        Install-Winget-FromMsix
-    }
-    catch {
-        Write-WarnMsg "MSIX-based winget install failed: $($_.Exception.Message)"
-    }
-}
-
-function Install-Node-WithWinget {
-    Write-Info "Installing Node.js LTS with winget..."
-    & winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent
-    if ($LASTEXITCODE -ne 0) {
-        throw "winget exited with code $LASTEXITCODE"
-    }
-}
-
-function Install-Node-WithMsi {
-    Write-Info "Falling back to direct MSI install for Node.js LTS..."
+function Get-NodeLtsZipInfo {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
     $idx = Invoke-RestMethod 'https://nodejs.org/dist/index.json'
-    $lts = $idx | Where-Object { $_.lts -and ($_.files -contains 'win-x64-msi') } | Select-Object -First 1
+    $lts = $idx | Where-Object { $_.lts -and ($_.files -contains 'win-x64-zip') } | Select-Object -First 1
 
     if (-not $lts) {
-        throw 'Could not resolve a Node.js LTS x64 MSI from nodejs.org'
+        throw 'Could not resolve a Node.js LTS x64 zip from nodejs.org'
     }
 
-    $url = "https://nodejs.org/dist/$($lts.version)/node-$($lts.version)-x64.msi"
-    $msi = Join-Path $env:TEMP 'node-lts-x64.msi'
+    return $lts
+}
 
-    Invoke-WebRequest -Uri $url -OutFile $msi
-    Start-Process msiexec.exe -Wait -ArgumentList "/i `"$msi`" /passive /norestart"
+function Install-NodeUserZip {
+    Write-Info 'Installing Node.js LTS to user directory (no admin)...'
+
+    $lts = Get-NodeLtsZipInfo
+    $version = $lts.version
+    $zipUrl = "https://nodejs.org/dist/$version/node-$version-win-x64.zip"
+    $zipPath = Join-Path $env:TEMP "node-$version-win-x64.zip"
+    $extractRoot = Join-Path $env:TEMP "node-$version-win-x64"
+
+    if (Test-Path $extractRoot) {
+        Remove-Item -Recurse -Force $extractRoot
+    }
+
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+    Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
+
+    if (-not (Test-Path $extractRoot)) {
+        throw "Extracted Node.js folder not found: $extractRoot"
+    }
+
+    if (Test-Path $UserNodeRoot) {
+        Remove-Item -Recurse -Force $UserNodeRoot
+    }
+
+    New-Item -ItemType Directory -Path (Split-Path -Parent $UserNodeRoot) -Force | Out-Null
+    Move-Item -Path $extractRoot -Destination $UserNodeRoot
+
+    if (-not (Test-Path (Join-Path $UserNodeRoot 'node.exe'))) {
+        throw "node.exe not found in: $UserNodeRoot"
+    }
+
+    Ensure-UserPathContains $UserNodeRoot
+    if (-not (($env:Path -split ';') -contains $UserNodeRoot)) {
+        $env:Path = "$UserNodeRoot;$env:Path"
+    }
+
+    Write-Ok "Node.js: $(& (Join-Path $UserNodeRoot 'node.exe') -v)"
+    Write-Ok "npm: $(& (Join-Path $UserNodeRoot 'npm.cmd') -v)"
 }
 
 function Ensure-Node {
     if ((Node-And-Npm-Ready) -and -not $ForceNodeReinstall) {
-        Write-Info "Node.js and npm already present."
+        Ensure-UserPathContains $UserNodeRoot
+        if (-not (($env:Path -split ';') -contains $UserNodeRoot)) {
+            $env:Path = "$UserNodeRoot;$env:Path"
+        }
+        Write-Info 'Node.js and npm already present (user install).'
         return
     }
 
-    Ensure-Winget
-
-    if (Command-Exists 'winget') {
-        try {
-            Install-Node-WithWinget
-        }
-        catch {
-            Write-WarnMsg "winget Node.js install failed: $($_.Exception.Message)"
-            Write-WarnMsg "Trying MSI fallback..."
-        }
+    if ($ForceNodeReinstall -and (Test-Path $UserNodeRoot)) {
+        Write-Info "Removing previous user Node.js install at $UserNodeRoot"
+        Remove-Item -Recurse -Force $UserNodeRoot
     }
 
+    Install-NodeUserZip
     Refresh-Path
 
     if (-not (Node-And-Npm-Ready)) {
-        Install-Node-WithMsi
-        Refresh-Path
+        throw 'Node.js/npm still not available after user install. Reopen PowerShell and retry.'
     }
-
-    if (-not (Node-And-Npm-Ready)) {
-        throw 'Node.js/npm still not available. Reopen PowerShell and retry.'
-    }
-
-    $nodeInstallDir = Resolve-NodeInstallDir
-    if ($nodeInstallDir) {
-        Ensure-UserPathContains $nodeInstallDir
-        if (-not (($env:Path -split ';') -contains $nodeInstallDir)) {
-            $env:Path = "$env:Path;$nodeInstallDir"
-        }
-    }
-
-    Write-Ok "Node.js: $(node -v)"
-    Write-Ok "npm: $(npm -v)"
 }
 
 function Invoke-PowerShellCodexProbe {
@@ -616,6 +609,7 @@ function Install-CodexPackage {
 }
 
 function Ensure-Codex {
+    Ensure-NpmUserPrefix
 
     if ($ForceCodexReinstall) {
         Write-Info 'Force reinstall requested: uninstalling existing Codex CLI...'

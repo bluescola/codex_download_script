@@ -1,5 +1,10 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$UserNodeRoot = if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    Join-Path $env:USERPROFILE '.local\node'
+} else {
+    Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
+}
 
 function Write-Info([string]$Message) {
     Write-Host "[INFO] $Message" -ForegroundColor Cyan
@@ -14,6 +19,12 @@ function Write-Ok([string]$Message) {
 }
 
 function Resolve-NodeInstallDir {
+    if (-not [string]::IsNullOrWhiteSpace($UserNodeRoot)) {
+        if (Test-Path (Join-Path $UserNodeRoot 'node.exe')) {
+            return $UserNodeRoot
+        }
+    }
+
     if (Test-Path "$env:ProgramFiles\nodejs\node.exe") {
         return "$env:ProgramFiles\nodejs"
     }
@@ -24,6 +35,20 @@ function Resolve-NodeInstallDir {
     }
 
     return $null
+}
+
+function Uninstall-NodeUser {
+    if ([string]::IsNullOrWhiteSpace($UserNodeRoot)) {
+        return $false
+    }
+
+    if (-not (Test-Path $UserNodeRoot)) {
+        return $false
+    }
+
+    Write-Info "Removing user Node.js install: $UserNodeRoot"
+    Remove-Item -Recurse -Force $UserNodeRoot
+    return $true
 }
 
 function Find-NodeUninstallEntry {
@@ -81,9 +106,13 @@ function Get-MsiGuidFromUninstallString([string]$UninstallString) {
 }
 
 function Uninstall-Node {
+    if (Uninstall-NodeUser) {
+        return $true
+    }
+
     $entry = Find-NodeUninstallEntry
     if (-not $entry) {
-        Write-WarnMsg 'Node.js uninstall entry not found.'
+        Write-WarnMsg 'Node.js uninstall entry not found (system install).'
         return $false
     }
 

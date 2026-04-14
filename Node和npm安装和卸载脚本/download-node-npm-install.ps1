@@ -4,6 +4,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$UserNodeRoot = if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    Join-Path $env:USERPROFILE '.local\node'
+} else {
+    Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
+}
 
 function Write-Info([string]$Message) {
     Write-Host "[INFO] $Message" -ForegroundColor Cyan
@@ -19,7 +24,7 @@ function Write-Ok([string]$Message) {
 
 function Refresh-Path {
     $extraPaths = @(
-        "$env:ProgramFiles\nodejs",
+        $UserNodeRoot,
         "$env:APPDATA\npm"
     )
 
@@ -31,84 +36,133 @@ function Refresh-Path {
     }
 }
 
-function Resolve-NodeInstallDir {
-    if (Test-Path "$env:ProgramFiles\nodejs\node.exe") {
-        return "$env:ProgramFiles\nodejs"
+function Ensure-UserPathContains([string]$PathEntry) {
+    if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+        return
     }
 
-    $alt = Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
-    if (Test-Path (Join-Path $alt 'node.exe')) {
-        return $alt
+    if (-not (Test-Path $PathEntry)) {
+        return
+    }
+
+    $normalizedEntry = $PathEntry.Trim().TrimEnd('\')
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $parts = @()
+    if (-not [string]::IsNullOrWhiteSpace($userPath)) {
+        $parts = $userPath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    }
+
+    foreach ($p in $parts) {
+        if ($p.Trim().TrimEnd('\') -ieq $normalizedEntry) {
+            return
+        }
+    }
+
+    $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) {
+        $normalizedEntry
+    } else {
+        "$userPath;$normalizedEntry"
+    }
+
+    [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+    Write-Info "Added to USER PATH: $normalizedEntry"
+}
+
+function Resolve-NodeInstallDir {
+    if (-not [string]::IsNullOrWhiteSpace($UserNodeRoot)) {
+        if (Test-Path (Join-Path $UserNodeRoot 'node.exe')) {
+            return $UserNodeRoot
+        }
     }
 
     return $null
 }
 
 function Node-And-Npm-Ready {
-    $dir = Resolve-NodeInstallDir
-    if (-not $dir) {
+    if ([string]::IsNullOrWhiteSpace($UserNodeRoot)) {
         return $false
     }
 
-    return (Test-Path (Join-Path $dir 'node.exe')) -and (Test-Path (Join-Path $dir 'npm.cmd'))
+    return (Test-Path (Join-Path $UserNodeRoot 'node.exe')) -and (Test-Path (Join-Path $UserNodeRoot 'npm.cmd'))
 }
 
-function Install-Node-WithMsi {
-    Write-Info "Downloading Node.js LTS MSI..."
+function Get-NodeLtsZipInfo {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
     $idx = Invoke-RestMethod 'https://nodejs.org/dist/index.json'
     $lts = $null
     foreach ($item in $idx) {
-        if ($item.lts -and ($item.files -contains 'win-x64-msi')) {
+        if ($item.lts -and ($item.files -contains 'win-x64-zip')) {
             $lts = $item
             break
         }
     }
 
     if (-not $lts) {
-        throw 'Could not resolve a Node.js LTS x64 MSI from nodejs.org'
+        throw 'Could not resolve a Node.js LTS x64 zip from nodejs.org'
     }
 
+    return $lts
+}
+
+function Install-NodeUserZip {
+    Write-Info 'Installing Node.js LTS to user directory (no admin)...'
+
+    $lts = Get-NodeLtsZipInfo
     $version = $lts.version
-    $url = "https://nodejs.org/dist/$version/node-$version-x64.msi"
-    $msi = Join-Path $env:USERPROFILE "Desktop\node-$version-x64.msi"
+    $zipUrl = "https://nodejs.org/dist/$version/node-$version-win-x64.zip"
+    $zipPath = Join-Path $env:TEMP "node-$version-win-x64.zip"
+    $extractRoot = Join-Path $env:TEMP "node-$version-win-x64"
 
     Write-Info "Version: $version"
-    Write-Info "URL: $url"
-    Write-Info "Saving to: $msi"
+    Write-Info "URL: $zipUrl"
 
-    if (-not (Test-Path $msi)) {
-        Invoke-WebRequest -Uri $url -OutFile $msi
-        Write-Info 'Download complete.'
-    } else {
-        Write-Info 'Installer already exists.'
+    if (Test-Path $extractRoot) {
+        Remove-Item -Recurse -Force $extractRoot
     }
 
-    Write-Info 'Starting silent install (UAC may prompt)...'
-    $proc = Start-Process msiexec.exe -Wait -Verb RunAs -PassThru -ArgumentList "/i `"$msi`" /qn /norestart"
-    $code = $proc.ExitCode
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+    Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
 
-    if ($code -ne 0) {
-        if ($code -eq 1602) {
-            Write-WarnMsg 'Install was canceled (UAC prompt denied or closed).'
-        } else {
-            Write-WarnMsg "msiexec exited with code $code"
-        }
-        return $false
+    if (-not (Test-Path $extractRoot)) {
+        throw "Extracted Node.js folder not found: $extractRoot"
     }
 
-    Write-Info 'Install finished.'
+    if (Test-Path $UserNodeRoot) {
+        Remove-Item -Recurse -Force $UserNodeRoot
+    }
+
+    New-Item -ItemType Directory -Path (Split-Path -Parent $UserNodeRoot) -Force | Out-Null
+    Move-Item -Path $extractRoot -Destination $UserNodeRoot
+
+    if (-not (Test-Path (Join-Path $UserNodeRoot 'node.exe'))) {
+        throw "node.exe not found in: $UserNodeRoot"
+    }
+
+    Write-Info "Installed to: $UserNodeRoot"
     return $true
 }
 
 function Ensure-Node {
     if ((Node-And-Npm-Ready) -and -not $ForceReinstall) {
-        Write-Info 'Node.js and npm already present.'
+        Ensure-UserPathContains $UserNodeRoot
+        if (-not (($env:Path -split ';') -contains $UserNodeRoot)) {
+            $env:Path = "$UserNodeRoot;$env:Path"
+        }
+        Write-Info 'Node.js and npm already present (user install).'
         return $true
     }
 
-    $ok = Install-Node-WithMsi
+    if ($ForceReinstall -and (Test-Path $UserNodeRoot)) {
+        Write-Info "Removing previous user Node.js install at $UserNodeRoot"
+        Remove-Item -Recurse -Force $UserNodeRoot
+    }
+
+    $ok = Install-NodeUserZip
+    Ensure-UserPathContains $UserNodeRoot
+    if (-not (($env:Path -split ';') -contains $UserNodeRoot)) {
+        $env:Path = "$UserNodeRoot;$env:Path"
+    }
     Refresh-Path
 
     if (-not $ok) {
@@ -156,7 +210,7 @@ function Verify-NodeNpm {
 
     $dir = Resolve-NodeInstallDir
     if (-not $dir) {
-        Write-WarnMsg 'Node.js install folder not found (Program Files or LocalAppData).'
+        Write-WarnMsg 'Node.js install folder not found under user directory.'
         return
     }
 
@@ -184,7 +238,7 @@ Write-Info 'Verifying node/npm...'
 Verify-NodeNpm
 
 if (-not $installed) {
-    Write-WarnMsg 'Install was not confirmed. If you saw a UAC prompt, please accept it and rerun.'
+    Write-WarnMsg 'Install was not confirmed. Review the messages above and retry.'
 }
 
 Write-Host ''

@@ -5,6 +5,8 @@ FORCE_NODE_REINSTALL=0
 FORCE_CODEX_REINSTALL=0
 REMOVE_SYSTEM_CODEX=0
 SKIP_CRS_CONFIG=0
+NODE_ROOT="${HOME}/.local/node"
+NPM_PREFIX="${HOME}/.npm-global"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -107,54 +109,75 @@ read_secret_required() {
   done
 }
 
-ensure_node_npm() {
-  if cmd_exists node && cmd_exists npm && [[ "$FORCE_NODE_REINSTALL" -eq 0 ]]; then
-    log_info "Node.js and npm already installed."
-    log_ok "Node.js: $(node -v)"
-    log_ok "npm: $(npm -v)"
-    return 0
-  fi
+install_node_user() {
+  log_info "Installing Node.js LTS to user directory (no sudo)..."
 
-  local SUDO
-  SUDO="$(need_sudo)"
-
-  if cmd_exists apt-get; then
-    log_info "Installing Node.js LTS via NodeSource (apt)..."
-    ${SUDO}apt-get update -y
-    ${SUDO}apt-get install -y ca-certificates curl gnupg
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | ${SUDO}bash -
-    ${SUDO}apt-get install -y nodejs
-  elif cmd_exists dnf; then
-    log_info "Installing Node.js LTS via NodeSource (dnf)..."
-    ${SUDO}dnf install -y ca-certificates curl
-    curl -fsSL https://rpm.nodesource.com/setup_lts.x | ${SUDO}bash -
-    ${SUDO}dnf install -y nodejs
-  elif cmd_exists yum; then
-    log_info "Installing Node.js LTS via NodeSource (yum)..."
-    ${SUDO}yum install -y ca-certificates curl
-    curl -fsSL https://rpm.nodesource.com/setup_lts.x | ${SUDO}bash -
-    ${SUDO}yum install -y nodejs
-  elif cmd_exists pacman; then
-    log_info "Installing Node.js/npm via pacman..."
-    ${SUDO}pacman -Sy --noconfirm nodejs npm
-  elif cmd_exists zypper; then
-    log_info "Installing Node.js/npm via zypper..."
-    ${SUDO}zypper --non-interactive install nodejs npm
-  elif cmd_exists apk; then
-    log_info "Installing Node.js/npm via apk..."
-    ${SUDO}apk add --no-cache nodejs npm
-  else
-    echo "[ERROR] Unsupported package manager. Install Node.js LTS manually, then re-run." >&2
+  if ! cmd_exists curl; then
+    echo "[ERROR] curl is required but not found." >&2
     exit 1
   fi
 
-  if ! cmd_exists node || ! cmd_exists npm; then
-    echo "[ERROR] Node.js/npm install did not complete successfully." >&2
+  local arch node_arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) node_arch='linux-x64' ;;
+    aarch64|arm64) node_arch='linux-arm64' ;;
+    armv7l) node_arch='linux-armv7l' ;;
+    *)
+      echo "[ERROR] Unsupported CPU architecture: $arch" >&2
+      exit 1
+      ;;
+  esac
+
+  local lts_version
+  lts_version="$(curl -fsSL https://nodejs.org/dist/index.tab | awk -F'\t' 'NR>1 && $9 != "-" {print $1; exit}')"
+  if [[ -z "$lts_version" ]]; then
+    echo "[ERROR] Failed to resolve Node.js LTS version." >&2
     exit 1
   fi
+
+  local tmp_dir tarball node_url
+  tmp_dir="$(mktemp -d)"
+  tarball="$tmp_dir/node.tar.xz"
+  node_url="https://nodejs.org/dist/${lts_version}/node-${lts_version}-${node_arch}.tar.xz"
+  curl -fsSL "$node_url" -o "$tarball"
+
+  mkdir -p "$NODE_ROOT"
+  tar -xJf "$tarball" -C "$NODE_ROOT"
+
+  local extracted_dir="$NODE_ROOT/node-${lts_version}-${node_arch}"
+  local target_dir="$NODE_ROOT/$lts_version"
+  if [[ -d "$target_dir" ]]; then
+    rm -rf "$target_dir"
+  fi
+  mv "$extracted_dir" "$target_dir"
+  ln -sfn "$target_dir" "$NODE_ROOT/current"
+
+  export PATH="$NODE_ROOT/current/bin:$PATH"
+  hash -r
 
   log_ok "Node.js: $(node -v)"
   log_ok "npm: $(npm -v)"
+}
+
+ensure_node_npm() {
+  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && [[ -x "$NODE_ROOT/current/bin/node" ]] && [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
+    log_info "Node.js and npm already installed (user directory)."
+    log_ok "Node.js: $("$NODE_ROOT/current/bin/node" -v)"
+    log_ok "npm: $("$NODE_ROOT/current/bin/npm" -v)"
+    return 0
+  fi
+
+  if cmd_exists node && cmd_exists npm && [[ "$FORCE_NODE_REINSTALL" -eq 0 ]]; then
+    log_warn "System Node.js/npm detected, but user-level install is required. Installing user copy..."
+  fi
+
+  if [[ "$FORCE_NODE_REINSTALL" -eq 1 && -d "$NODE_ROOT" ]]; then
+    log_info "Removing previous user Node.js install at $NODE_ROOT"
+    rm -rf "$NODE_ROOT"
+  fi
+
+  install_node_user
 }
 
 upsert_path_block() {
@@ -182,7 +205,7 @@ upsert_path_block() {
 }
 
 ensure_user_npm_prefix() {
-  local user_prefix="$HOME/.npm-global"
+  local user_prefix="$NPM_PREFIX"
   local npm_prefix
   npm_prefix="$(npm config get prefix 2>/dev/null || true)"
 
@@ -194,11 +217,19 @@ ensure_user_npm_prefix() {
   fi
 
   local npm_bin="${user_prefix%/}/bin"
+  local node_bin=""
+  if [[ -d "$NODE_ROOT/current/bin" ]]; then
+    node_bin="$NODE_ROOT/current/bin"
+  fi
   export PATH="$npm_bin:$PATH"
 
   local block_start="# >>> codex user paths >>>"
   local block_end="# <<< codex user paths <<<"
-  local line="export PATH=\"$npm_bin:\$PATH\""
+  local line="export PATH=\"$npm_bin"
+  if [[ -n "$node_bin" ]]; then
+    line="$line:$node_bin"
+  fi
+  line="$line:\$PATH\""
 
   upsert_path_block "$HOME/.bashrc" "$block_start" "$block_end" "$line"
   upsert_path_block "$HOME/.zshrc" "$block_start" "$block_end" "$line"
