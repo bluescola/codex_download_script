@@ -1,8 +1,8 @@
-# Codex CLI 配置指南（Windows）
+# Codex CLI 配置指南（macOS）
 
 > 通过 CRS 服务器使用 ChatGPT Pro 的 Codex 代码助手
 
-**适用系统**: Windows 10/11（PowerShell 或命令提示符）
+**适用系统**: macOS（zsh / bash）
 **前提条件**: 已安装 Codex CLI（未安装可按下方步骤安装）
 **预计耗时**: 5-10 分钟
 
@@ -14,36 +14,47 @@
 
 ### 步骤 0: 安装 Node.js（含 npm）
 
-推荐使用 `winget` 安装 Node.js LTS（含 npm）。
+请先安装 **Node.js LTS（建议 >= 18）**。
 
-若提示 `winget` 不存在，可先在 **管理员 PowerShell** 执行：
+方式 1（推荐）：Homebrew
 
-```powershell
-$progressPreference = 'silentlyContinue'
-Install-PackageProvider -Name NuGet -Force | Out-Null
-Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null
-Repair-WinGetPackageManager -AllUsers
-winget --version
-```
-
-然后在 PowerShell 执行：
-
-```powershell
-winget install -e --id OpenJS.NodeJS.LTS
+```bash
+brew --version
+brew install node
 node -v
 npm -v
 ```
 
-> 若提示找不到 `node` 或 `npm`，请 **重开终端** 再试一次。
+如果提示 `brew: command not found`，说明你还没安装 Homebrew：
+
+```bash
+# 先安装命令行工具（如已安装会提示已存在）
+xcode-select --install
+
+# 安装 Homebrew（官方命令）
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 安装完成后，Homebrew 会打印 “Next steps”，照着执行把 brew 加入 PATH
+brew --version
+```
+
+方式 2：从 Node.js 官网下载并安装 LTS（图形化安装）
+
+安装完成后同样验证：
+
+```bash
+node -v
+npm -v
+```
 
 ### 步骤 1: 安装 Codex CLI
 
-```powershell
+```bash
 npm i -g @openai/codex
 codex --version
 ```
 
-> 若提示 `codex` 不是内部或外部命令，请先重开终端；仍不行再检查 npm 全局 bin 是否在 PATH。
+> 若提示 `codex: command not found`，请重开终端，或确认 npm 全局 bin 已加入 `PATH`。
 
 ---
 
@@ -67,29 +78,23 @@ API Key: cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ### 步骤 1: 创建配置目录
 
-PowerShell:
-
-```powershell
-mkdir $env:USERPROFILE\.codex -Force
-```
-
-命令提示符（cmd）:
-
-```cmd
-mkdir %USERPROFILE%\.codex
+```bash
+# 创建 Codex 配置目录
+mkdir -p ~/.codex
 ```
 
 ---
 
 ### 步骤 2: 配置 config.toml
 
-用记事本打开（不存在会新建）：
+在 `~/.codex/config.toml` 文件**开头**添加以下配置：
 
-```cmd
-notepad %USERPROFILE%\.codex\config.toml
+```bash
+# 创建或编辑配置文件
+nano ~/.codex/config.toml
 ```
 
-粘贴以下内容（把 `base_url` 改成你的服务器地址）：
+粘贴以下内容：
 
 ```toml
 model_provider = "crs"
@@ -100,7 +105,7 @@ preferred_auth_method = "apikey"
 
 [model_providers.crs]
 name = "crs"
-base_url = "http://x.x.x.x:10086/openai"
+base_url = "http://127.0.0.1:3000/openai"  # 根据实际填写你服务器的ip地址或者域名
 wire_api = "responses"
 requires_openai_auth = false
 env_key = "CRS_OAI_KEY"
@@ -123,27 +128,30 @@ base_url = "http://x.x.x.x:10086/openai"
 - `medium`: 平衡性能
 - `high`: 深度思考（推荐）
 
-保存文件：按 `Ctrl+S` 保存，关闭记事本。
+保存文件：按 `Ctrl+O` 回车保存，按 `Ctrl+X` 退出。
 
 ---
 
 ### 步骤 3: 配置 auth.json
 
-用记事本打开（不存在会新建）：
+在 `~/.codex/auth.json` 文件中配置 API 密钥为 `null`：
 
-```cmd
-notepad %USERPROFILE%\.codex\auth.json
+```bash
+# 创建或编辑认证文件
+nano ~/.codex/auth.json
 ```
 
 粘贴以下内容：
 
 ```json
 {
-  "OPENAI_API_KEY": null
+    "OPENAI_API_KEY": null
 }
 ```
 
 **说明**：设置为 `null` 表示不使用 OpenAI 官方 API，而是通过 CRS 服务器中转。
+
+保存并退出。
 
 ---
 
@@ -151,33 +159,49 @@ notepad %USERPROFILE%\.codex\auth.json
 
 #### 方法 1: 永久设置（推荐）
 
-写入 **用户环境变量**（需要重开终端生效）：
+macOS 默认 shell 通常为 zsh，推荐写入 `~/.zshrc`：
 
-```cmd
-setx CRS_OAI_KEY "cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```bash
+# 编辑 zshrc
+nano ~/.zshrc
 ```
 
-重开 PowerShell 后验证：
+在文件**末尾**添加：
 
-```powershell
-echo $env:CRS_OAI_KEY
+```bash
+# CRS API Key for Codex CLI
+export CRS_OAI_KEY="后台创建的API密钥"
 ```
+
+**⚠️ 重要**：将 `后台创建的API密钥` 替换为管理员提供的实际 API Key。
+
+示例：
+
+```bash
+export CRS_OAI_KEY="cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+保存并退出，然后加载环境变量：
+
+```bash
+# 立即应用配置
+source ~/.zshrc
+
+# 验证环境变量
+echo $CRS_OAI_KEY
+```
+
+> 如果你使用的是 bash，请改为写入 `~/.bashrc` 并执行 `source ~/.bashrc`。
 
 #### 方法 2: 临时设置
 
-只在当前终端会话有效：
+如果只想临时使用，可以直接在终端执行：
 
-PowerShell:
-
-```powershell
-$env:CRS_OAI_KEY="cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```bash
+export CRS_OAI_KEY="cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
-命令提示符（cmd）:
-
-```cmd
-set CRS_OAI_KEY=cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+**注意**：此方法仅在当前终端会话有效，关闭终端后失效。
 
 ---
 
@@ -185,41 +209,27 @@ set CRS_OAI_KEY=cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ### 测试 1: 检查环境变量
 
-PowerShell:
-
-```powershell
-echo $env:CRS_OAI_KEY
-```
-
-命令提示符（cmd）:
-
-```cmd
-echo %CRS_OAI_KEY%
+```bash
+echo $CRS_OAI_KEY
 ```
 
 应该输出完整的 API Key（以 `cr_` 开头）。
 
 ### 测试 2: 检查配置文件
 
-PowerShell:
+```bash
+# 查看配置文件是否存在
+ls -la ~/.codex/
 
-```powershell
-Get-ChildItem $env:USERPROFILE\.codex
+# 应该看到:
+# config.toml
+# auth.json
 ```
-
-命令提示符（cmd）:
-
-```cmd
-dir %USERPROFILE%\.codex
-```
-
-应该看到：
-- `config.toml`
-- `auth.json`
 
 ### 测试 3: 测试连接
 
-```powershell
+```bash
+# 简单测试
 codex "Hello, 你好"
 ```
 
@@ -227,7 +237,8 @@ codex "Hello, 你好"
 
 ### 测试 4: 测试代码生成
 
-```powershell
+```bash
+# 测试代码生成
 codex "写一个 Python 函数计算斐波那契数列"
 ```
 
@@ -240,10 +251,11 @@ codex "写一个 Python 函数计算斐波那契数列"
 完成配置后，确认以下内容：
 
 ```
-□ %USERPROFILE%\.codex\config.toml 已创建并配置正确的 base_url
-□ %USERPROFILE%\.codex\auth.json 已创建并设置 OPENAI_API_KEY 为 null
-□ CRS_OAI_KEY 已写入用户环境变量（setx）或在当前会话临时设置
-□ 重开终端后 echo CRS_OAI_KEY 能显示正确的 API Key
+□ ~/.codex/config.toml 已创建并配置正确的 base_url
+□ ~/.codex/auth.json 已创建并设置 OPENAI_API_KEY 为 null
+□ 环境变量 CRS_OAI_KEY 已添加到 ~/.zshrc（或 ~/.bashrc）
+□ 执行 source ~/.zshrc（或 source ~/.bashrc）加载环境变量
+□ echo $CRS_OAI_KEY 显示正确的 API Key
 □ codex "Hello" 测试成功
 ```
 
@@ -251,7 +263,9 @@ codex "写一个 Python 函数计算斐波那契数列"
 
 ## 💡 日常使用
 
-```powershell
+### 基本命令
+
+```bash
 # 单次提问
 codex "如何在 Python 中读取 CSV 文件？"
 
@@ -267,7 +281,7 @@ codex "解释这段代码的功能: [粘贴代码]"
 
 ### 切换模型
 
-如果想使用更快的模型，编辑 `%USERPROFILE%\.codex\config.toml`：
+如果想使用更快的模型，编辑 `~/.codex/config.toml`：
 
 ```toml
 # 将 max 改为 mini，获得更快响应
@@ -275,7 +289,7 @@ model = "gpt-5.1-codex-mini"
 model_reasoning_effort = "medium"
 ```
 
-修改后立即生效，无需重启（但建议重开一次终端以避免环境变量/Path 未刷新）。
+修改后立即生效，无需重启。
 
 ---
 
@@ -287,12 +301,16 @@ model_reasoning_effort = "medium"
 
 **排查步骤**：
 
-1. 检查 `config.toml` 中的 `base_url` 是否正确（是否带 `/openai`）。
-2. 测试服务器连通性（示例）：
-   ```powershell
-   curl.exe http://服务器IP:端口/health
+1. 检查配置文件中的服务器地址：
+   ```bash
+   cat ~/.codex/config.toml | grep base_url
    ```
-3. 联系管理员确认服务器状态。
+2. 测试服务器连通性：
+   ```bash
+   curl http://服务器IP:端口/health
+   # 应返回: {"status":"healthy",...}
+   ```
+3. 联系管理员确认服务器状态
 
 ---
 
@@ -303,41 +321,29 @@ model_reasoning_effort = "medium"
 **排查步骤**：
 
 1. 检查环境变量是否设置：
-   ```powershell
-   echo $env:CRS_OAI_KEY
+   ```bash
+   echo $CRS_OAI_KEY
    ```
-2. 若你用的是 `setx`，请确认 **重开终端** 后再试。
-3. 仍失败请联系管理员更换 Key。
+2. 如果显示为空，重新加载配置：
+   ```bash
+   source ~/.zshrc
+   echo $CRS_OAI_KEY
+   ```
+3. 如果仍然失败，联系管理员获取新的 API Key
 
 ---
 
-### Q3: 提示 "`codex` 不是内部或外部命令"
+### Q3: 每次打开新终端都需要重新设置环境变量
 
-**原因**：npm 全局命令目录未加入 PATH，或需要重开终端
+**原因**：环境变量未正确添加到 `~/.zshrc`（或 `~/.bashrc`）
 
-**排查步骤**：
+**解决方法**：
 
-1. 先重开 PowerShell / cmd。
-2. 查看是否能定位到 `codex`：
-   - PowerShell:
-     ```powershell
-     Get-Command codex -ErrorAction SilentlyContinue
-     ```
-   - cmd:
-     ```cmd
-     where codex
-     ```
-3. 查看 npm 全局前缀（codex 通常安装在该前缀的 `bin` 目录）：
-   ```powershell
-   npm config get prefix
+1. 确认 rc 文件中有以下内容：
+   ```bash
+   grep -n "CRS_OAI_KEY" ~/.zshrc ~/.bashrc 2>/dev/null || true
    ```
-4. Windows 下常见的 npm 全局命令目录是 `%APPDATA%\npm`（例如 `C:\Users\<你>\AppData\Roaming\npm`），请确认它在 **用户 Path** 里。
-   - 查看该目录：
-     ```powershell
-     echo $env:APPDATA
-     dir "$env:APPDATA\\npm"
-     ```
-   - 若 Path 缺失：打开“系统属性 -> 高级 -> 环境变量”，编辑“用户变量”里的 `Path`，添加 `%APPDATA%\npm`，然后重开终端。
+2. 如果没有，重新添加并 `source` 对应文件。
 
 ---
 
@@ -347,7 +353,7 @@ model_reasoning_effort = "medium"
 
 **解决方法**：使用单次提问模式，不要直接运行 `codex` 进入交互模式
 
-```powershell
+```bash
 # 正确
 codex "你的问题"
 
@@ -359,14 +365,15 @@ echo "问题" | codex
 
 ## 📁 配置文件结构
 
+完整的配置目录结构：
+
 ```
-%USERPROFILE%\.codex\
+~/.codex/
 ├── config.toml       # 主配置（服务器地址、模型）
 ├── auth.json         # 认证配置（设为 null）
 └── ...               # 其他自动生成的文件
 
-用户环境变量:
-  CRS_OAI_KEY          # CRS API Key
+~/.zshrc 或 ~/.bashrc # 环境变量（CRS_OAI_KEY）
 ```
 
 ---
@@ -378,8 +385,10 @@ echo "问题" | codex
 - 不要提交到 Git 仓库
 - 不要在公开场合展示或截图
 
-⚠️ **说明**：
-- Windows 与 WSL 的配置互不影响；如果你在 WSL 中使用 codex，需要在 `~/.codex` 另行配置。
+⚠️ **合理使用**：
+- API Key 可能有使用配额限制
+- 避免滥用或高频请求
+- 仅供个人学习和开发使用
 
 ---
 
@@ -387,17 +396,17 @@ echo "问题" | codex
 
 完整配置需要修改三个位置：
 
-### 1. `%USERPROFILE%\.codex\config.toml`
+### 1. `~/.codex/config.toml`
 - 设置 `base_url` 为 CRS 服务器地址
 - 配置 `model` 和 `model_reasoning_effort`
 - 指定 `env_key = "CRS_OAI_KEY"`
 
-### 2. `%USERPROFILE%\.codex\auth.json`
+### 2. `~/.codex/auth.json`
 - 设置 `"OPENAI_API_KEY": null`
 
-### 3. 用户环境变量 `CRS_OAI_KEY`
-- 推荐使用 `setx` 写入用户环境变量
-- 注意 `setx` 需要重开终端生效
+### 3. `~/.zshrc`（或 `~/.bashrc`）
+- 添加 `export CRS_OAI_KEY="你的密钥"`
+- 执行 `source ~/.zshrc`（或 `source ~/.bashrc`）加载
 
 ---
 

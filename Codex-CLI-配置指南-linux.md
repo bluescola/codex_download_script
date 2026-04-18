@@ -1,12 +1,92 @@
-# Codex CLI 配置指南
+# Codex CLI 配置指南（Linux/WSL）
 
 > 通过 CRS 服务器使用 ChatGPT Pro 的 Codex 代码助手
 
-**适用系统**: WSL/Linux/macOS
-**前提条件**: 已安装 Codex CLI
-**预计耗时**: 5 分钟
+**适用系统**: WSL/Linux
+**前提条件**: 已安装 Codex CLI（未安装可按下方步骤安装）
+**预计耗时**: 5-10 分钟
 
 ---
+
+## 📥 安装 Codex CLI（新增）
+
+> 如果你已经能在终端运行 `codex --version`，可直接跳到“前置准备”。
+
+### 步骤 0: 安装 Node.js（含 npm）
+
+请先安装 **Node.js LTS（建议 >= 18）**。
+
+```bash
+node -v
+npm -v
+```
+
+下面给出几种常见安装方式（按你自己的系统选择其一即可）。
+
+#### 方式 A：使用系统包管理器（最简单）
+
+Ubuntu / Debian / WSL（推荐先用这条）：
+
+```bash
+sudo apt update
+sudo apt install -y nodejs npm
+node -v
+npm -v
+```
+
+Fedora / RHEL 系：
+
+```bash
+sudo dnf install -y nodejs npm
+node -v
+npm -v
+```
+
+Arch / Manjaro：
+
+```bash
+sudo pacman -S --noconfirm nodejs npm
+node -v
+npm -v
+```
+
+> 说明：部分发行版仓库自带的 Node 版本可能偏旧；如果 `node -v` 显示版本低于 18，建议改用方式 B（nvm）。
+
+#### 方式 B：使用 nvm（版本可控，推荐）
+
+1) 安装 nvm（Node Version Manager）：
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+```
+
+2) 让当前终端加载 nvm（按提示 source 你的 rc 文件；常见是 `~/.bashrc` 或 `~/.zshrc`）：
+
+```bash
+# bash
+source ~/.bashrc
+
+# zsh
+# source ~/.zshrc
+```
+
+3) 安装并使用 LTS：
+
+```bash
+nvm install --lts
+nvm use --lts
+node -v
+npm -v
+```
+
+### 步骤 1: 安装 Codex CLI
+
+```bash
+npm i -g @openai/codex
+codex --version
+```
+
+> 若提示 `codex: command not found`，请重开终端，或确认 npm 全局 bin 已加入 `PATH`。
 
 ## 📋 前置准备
 
@@ -107,11 +187,14 @@ nano ~/.codex/auth.json
 
 #### 方法 1: 永久设置（推荐）
 
-编辑 `~/.bashrc` 文件：
+编辑 `~/.bashrc`（bash）或 `~/.zshrc`（zsh）文件：
 
 ```bash
-# 编辑 bashrc
+# bash
 nano ~/.bashrc
+
+# zsh（如你使用 zsh）
+# nano ~/.zshrc
 ```
 
 在文件**末尾**添加：
@@ -135,6 +218,8 @@ export CRS_OAI_KEY="cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```bash
 # 立即应用配置
 source ~/.bashrc
+# 若你写入的是 ~/.zshrc，则执行：
+# source ~/.zshrc
 
 # 验证环境变量
 echo $CRS_OAI_KEY
@@ -201,8 +286,8 @@ codex "写一个 Python 函数计算斐波那契数列"
 ```
 □ ~/.codex/config.toml 已创建并配置正确的 base_url
 □ ~/.codex/auth.json 已创建并设置 OPENAI_API_KEY 为 null
-□ 环境变量 CRS_OAI_KEY 已添加到 ~/.bashrc
-□ 执行 source ~/.bashrc 加载环境变量
+□ 环境变量 CRS_OAI_KEY 已添加到 ~/.bashrc 或 ~/.zshrc
+□ 执行 source ~/.bashrc 或 source ~/.zshrc 加载环境变量
 □ echo $CRS_OAI_KEY 显示正确的 API Key
 □ codex "Hello" 测试成功
 ```
@@ -332,7 +417,7 @@ echo "问题" | codex
 ├── auth.json         # 认证配置（设为 null）
 └── ...               # 其他自动生成的文件
 
-~/.bashrc             # 环境变量（CRS_OAI_KEY）
+~/.bashrc / ~/.zshrc  # 环境变量（CRS_OAI_KEY）
 ```
 
 ---
@@ -366,6 +451,7 @@ echo "问题" | codex
 ### 3. `~/.bashrc`
 - 添加 `export CRS_OAI_KEY="你的密钥"`
 - 执行 `source ~/.bashrc` 加载
+  - 若使用 zsh，则改为写入/加载 `~/.zshrc`
 
 ---
 
@@ -382,5 +468,5 @@ echo "问题" | codex
 ---
 
 **文档版本**: 2.0
-**更新时间**: 2026-01-08
+**更新时间**: 2026-04-18
 **维护者**: 请联系管理员
