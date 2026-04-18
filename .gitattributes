@@ -1,1 +1,17 @@
+# Line ending policy:
+# - Keep most text files as LF across platforms (works well with WSL/Linux/macOS).
+# - Keep Windows batch scripts as CRLF for cmd.exe compatibility.
+
+# Default for all text: LF.
+* text=auto eol=lf
+
+# Shell scripts (explicit).
 *.sh text eol=lf
+*.command text eol=lf
+
+# Windows batch scripts: CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Treat binary artifacts as binary (no CRLF conversion).
+*.bin -text
