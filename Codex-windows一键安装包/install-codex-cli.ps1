@@ -216,6 +216,122 @@ function Resolve-NodeInstallDir {
     return $null
 }
 
+function Test-PreexistingNodeAndNpm {
+    $nodeDir = $null
+    try {
+        $nodeDir = Resolve-NodeInstallDir
+    }
+    catch {
+        $nodeDir = $null
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($nodeDir)) {
+        $nodeExe = Join-Path $nodeDir 'node.exe'
+        $npmCmd = Join-Path $nodeDir 'npm.cmd'
+        if ((Test-Path $nodeExe) -and (Test-Path $npmCmd)) {
+            return $true
+        }
+    }
+
+    return (Command-Exists 'node') -and (Command-Exists 'npm')
+}
+
+function Test-PreexistingCodex {
+    if (Command-Exists 'codex') {
+        return $true
+    }
+    if (Command-Exists 'codex.cmd') {
+        return $true
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        $appDataNpm = Join-Path $env:APPDATA 'npm'
+        if (Test-Path (Join-Path $appDataNpm 'codex.cmd')) {
+            return $true
+        }
+        if (Test-Path (Join-Path $appDataNpm 'codex.ps1')) {
+            return $true
+        }
+    }
+
+    if (Command-Exists 'npm') {
+        try {
+            $prefix = (& npm config get prefix).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($prefix)) {
+                if (Test-Path (Join-Path $prefix 'codex.cmd')) {
+                    return $true
+                }
+                if (Test-Path (Join-Path $prefix 'codex.ps1')) {
+                    return $true
+                }
+            }
+        }
+        catch {
+        }
+    }
+
+    return $false
+}
+
+function Test-PreexistingNodeNpmCodex {
+    return (Test-PreexistingNodeAndNpm) -and (Test-PreexistingCodex)
+}
+
+function Clear-ExistingCrsConfig {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CodexDir
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CodexDir) -or -not (Test-Path $CodexDir)) {
+        return
+    }
+
+    $targets = @(
+        Join-Path $CodexDir 'config.toml'
+        Join-Path $CodexDir 'auth.json'
+    )
+
+    foreach ($file in $targets) {
+        if (Test-Path $file) {
+            try {
+                Remove-Item -LiteralPath $file -Force -ErrorAction Stop
+                Write-Info "Removed old config: $file"
+            }
+            catch {
+                Write-WarnMsg "Failed to remove ${file}: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    foreach ($pattern in @('config.toml.bak.*', 'auth.json.bak.*')) {
+        try {
+            $matches = @(Get-ChildItem -Path $CodexDir -Force -File -Filter $pattern -ErrorAction SilentlyContinue)
+            foreach ($m in $matches) {
+                try {
+                    Remove-Item -LiteralPath $m.FullName -Force -ErrorAction Stop
+                    Write-Info "Removed old backup: $($m.FullName)"
+                }
+                catch {
+                    Write-WarnMsg "Failed to remove $($m.FullName): $($_.Exception.Message)"
+                }
+            }
+        }
+        catch {
+        }
+    }
+
+    # Avoid leaking/using stale keys between reconfiguration runs.
+    try {
+        [Environment]::SetEnvironmentVariable('CRS_OAI_KEY', $null, 'User')
+    }
+    catch {
+        Write-WarnMsg "Failed to clear USER env CRS_OAI_KEY: $($_.Exception.Message)"
+    }
+
+    Remove-Item Env:CRS_OAI_KEY -ErrorAction SilentlyContinue
+}
+
 function Backup-FileIfExists([string]$PathToBackup) {
     if (-not (Test-Path $PathToBackup)) {
         return
@@ -660,6 +776,10 @@ function Ensure-Codex {
 }
 
 function Configure-CrsFiles {
+    param(
+        [switch]$CleanExistingConfig
+    )
+
     $codexDir = Join-Path $env:USERPROFILE '.codex'
     $configPath = Join-Path $codexDir 'config.toml'
     $authPath = Join-Path $codexDir 'auth.json'
@@ -671,15 +791,26 @@ function Configure-CrsFiles {
     $crsKey = Read-SecretInput 'Enter CRS_OAI_KEY (input hidden)'
 
     New-Item -ItemType Directory -Path $codexDir -Force | Out-Null
-    Backup-FileIfExists $configPath
-    Backup-FileIfExists $authPath
+    if ($CleanExistingConfig) {
+        Write-Info 'Detected existing node/npm/codex; cleaning old CRS configuration before regenerating...'
+        Clear-ExistingCrsConfig -CodexDir $codexDir
+    }
+    else {
+        Backup-FileIfExists $configPath
+        Backup-FileIfExists $authPath
+    }
 
     $configToml = @"
 model_provider = "crs"
-model = "gpt-5.1-codex-max"
-model_reasoning_effort = "high"
+model = "gpt-5.2"
+model_reasoning_effort = "xhigh"
 disable_response_storage = true
 preferred_auth_method = "apikey"
+
+sandbox_mode = "danger-full-access"
+approval_policy = "on-request"
+# 或者更激进：
+# approval_policy = "never"
 
 [model_providers.crs]
 name = "crs"
@@ -687,6 +818,16 @@ base_url = "$baseUrl"
 wire_api = "responses"
 requires_openai_auth = false
 env_key = "CRS_OAI_KEY"
+
+[features]
+# 实际已去除
+tui_app_server = false
+# 关闭MCP和 工具 / 列表 / 发现/建议
+apps = false
+
+[notice.model_migrations]
+"gpt-5.1-codex-max" = "gpt-5.4"
+"gpt-5.2" = "gpt-5.4"
 "@
 
     $authJson = @"
@@ -708,11 +849,19 @@ env_key = "CRS_OAI_KEY"
 }
 
 Write-Info 'Starting install for Codex CLI and dependencies...'
+$cleanExistingConfig = $false
+try {
+    $cleanExistingConfig = Test-PreexistingNodeNpmCodex
+}
+catch {
+    $cleanExistingConfig = $false
+}
+
 Ensure-Node
 Ensure-Codex
 
 if (-not $SkipCrsConfig) {
-    Configure-CrsFiles
+    Configure-CrsFiles -CleanExistingConfig:$cleanExistingConfig
 }
 
 Write-Host ''

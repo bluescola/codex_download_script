@@ -127,17 +127,30 @@ nano ~/.codex/config.toml
 
 ```toml
 model_provider = "crs"
-model = "gpt-5.1-codex-max"
-model_reasoning_effort = "high"
+model = "gpt-5.2"
+model_reasoning_effort = "xhigh"
 disable_response_storage = true
 preferred_auth_method = "apikey"
 
+sandbox_mode = "danger-full-access"
+approval_policy = "on-request"
+# Or more aggressive:
+# approval_policy = "never"
+
 [model_providers.crs]
 name = "crs"
-base_url = "http://127.0.0.1:3000/openai"  # 根据实际填写你服务器的ip地址或者域名
+base_url = "http://x.x.x.x:10086/openai"  # 根据实际填写你服务器的 ip 地址或者域名
 wire_api = "responses"
 requires_openai_auth = false
 env_key = "CRS_OAI_KEY"
+
+[features]
+tui_app_server = false
+apps = false
+
+[notice.model_migrations]
+"gpt-5.1-codex-max" = "gpt-5.4"
+"gpt-5.2" = "gpt-5.4"
 ```
 
 **⚠️ 重要修改**：将 `base_url` 中的地址替换为管理员提供的服务器地址。
@@ -148,13 +161,13 @@ base_url = "http://x.x.x.x:10086/openai"
 ```
 
 **模型说明**：
-- `gpt-5.1-codex-mini`: 快速响应，适合简单问题
-- `gpt-5.1-codex-max`: 深度思考，适合复杂问题（推荐）
+- 默认使用 `gpt-5.2`（如管理员提供其他模型名，也可以直接替换 `model = "..."`）
 
 **推理深度**：
 - `low`: 快速响应
 - `medium`: 平衡性能
 - `high`: 深度思考（推荐）
+- `xhigh`: 更深度思考（更慢，但更稳）
 
 保存文件：按 `Ctrl+O` 回车保存，按 `Ctrl+X` 退出。
 
@@ -317,9 +330,11 @@ codex "解释这段代码的功能: [粘贴代码]"
 如果想使用更快的模型，编辑 `~/.codex/config.toml`：
 
 ```toml
-# 将 max 改为 mini，获得更快响应
-model = "gpt-5.1-codex-mini"
+# 更快响应：降低推理深度（越低越快）
 model_reasoning_effort = "medium"
+
+# 如果管理员提供了其他模型名，也可以直接切换 model，例如：
+# model = "gpt-5.4"
 ```
 
 修改后立即生效，无需重启。

@@ -69,6 +69,73 @@ backup_if_exists() {
   fi
 }
 
+test_preexisting_node_npm() {
+  if [[ -x "$NODE_ROOT/current/bin/node" ]] && [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
+    return 0
+  fi
+  cmd_exists node && cmd_exists npm
+}
+
+test_preexisting_codex() {
+  if cmd_exists codex; then
+    return 0
+  fi
+
+  if [[ -x "$NPM_PREFIX/bin/codex" ]]; then
+    return 0
+  fi
+
+  if test_preexisting_node_npm; then
+    local npm_cmd prefix npm_bin
+    npm_cmd="npm"
+    if [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
+      npm_cmd="$NODE_ROOT/current/bin/npm"
+    fi
+
+    prefix="$("$npm_cmd" config get prefix 2>/dev/null || true)"
+    npm_bin="${prefix%/}/bin"
+    if [[ -n "$prefix" ]] && [[ -x "$npm_bin/codex" ]]; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+test_preexisting_node_npm_codex() {
+  test_preexisting_node_npm && test_preexisting_codex
+}
+
+clear_existing_crs_config() {
+  local codex_dir="$1"
+  local config_path auth_path
+  config_path="$codex_dir/config.toml"
+  auth_path="$codex_dir/auth.json"
+
+  if [[ -f "$config_path" ]]; then
+    rm -f "$config_path"
+    log_info "Removed old config: $config_path"
+  fi
+  if [[ -f "$auth_path" ]]; then
+    rm -f "$auth_path"
+    log_info "Removed old config: $auth_path"
+  fi
+
+  local backups=()
+  shopt -s nullglob
+  backups+=( "${config_path}.bak."* )
+  backups+=( "${auth_path}.bak."* )
+  shopt -u nullglob
+  if ((${#backups[@]})); then
+    rm -f "${backups[@]}"
+    for b in "${backups[@]}"; do
+      log_info "Removed old backup: $b"
+    done
+  fi
+
+  unset CRS_OAI_KEY || true
+}
+
 read_required() {
   local prompt="$1"
   local value=''
@@ -259,6 +326,7 @@ upsert_env_in_file() {
 }
 
 configure_crs() {
+  local clean_existing="${1:-0}"
   local codex_dir config_path auth_path base_url crs_key
   codex_dir="$HOME/.codex"
   config_path="$codex_dir/config.toml"
@@ -269,15 +337,25 @@ configure_crs() {
   crs_key="$(read_secret_required 'Enter CRS_OAI_KEY (hidden input): ')"
 
   mkdir -p "$codex_dir"
-  backup_if_exists "$config_path"
-  backup_if_exists "$auth_path"
+  if [[ "$clean_existing" -eq 1 ]]; then
+    log_info "Detected existing node/npm/codex; cleaning old CRS configuration before regenerating..."
+    clear_existing_crs_config "$codex_dir"
+  else
+    backup_if_exists "$config_path"
+    backup_if_exists "$auth_path"
+  fi
 
   cat > "$config_path" <<CFG
 model_provider = "crs"
-model = "gpt-5.1-codex-max"
-model_reasoning_effort = "high"
+model = "gpt-5.2"
+model_reasoning_effort = "xhigh"
 disable_response_storage = true
 preferred_auth_method = "apikey"
+
+sandbox_mode = "danger-full-access"
+approval_policy = "on-request"
+# Or more aggressive:
+# approval_policy = "never"
 
 [model_providers.crs]
 name = "crs"
@@ -285,6 +363,14 @@ base_url = "$base_url"
 wire_api = "responses"
 requires_openai_auth = false
 env_key = "CRS_OAI_KEY"
+
+[features]
+tui_app_server = false
+apps = false
+
+[notice.model_migrations]
+"gpt-5.1-codex-max" = "gpt-5.4"
+"gpt-5.2" = "gpt-5.4"
 CFG
 
   cat > "$auth_path" <<'AUTH'
@@ -306,13 +392,18 @@ main() {
   require_non_root
   require_macos
 
+  local clean_existing_config=0
+  if test_preexisting_node_npm_codex; then
+    clean_existing_config=1
+  fi
+
   log_info "Starting one-click install for macOS Codex CLI package..."
   ensure_node_npm
   ensure_npm_user_prefix
   ensure_codex
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
-    configure_crs
+    configure_crs "$clean_existing_config"
   fi
 
   printf '\n'
