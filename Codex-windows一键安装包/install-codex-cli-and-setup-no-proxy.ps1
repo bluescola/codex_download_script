@@ -16,25 +16,17 @@ function Write-Ok([string]$Message) {
 }
 
 try {
-    # This wrapper lives under the installer folder. Use its parent as repo root so we can also find
-    # the NO_PROXY setup script located elsewhere in this repo.
-    $repoRoot = Split-Path -Parent $PSScriptRoot
-
-    function Resolve-UniqueScriptPath([string]$Root, [string]$FileName) {
-        $matches = @(Get-ChildItem -Path $Root -Recurse -File -Filter $FileName -ErrorAction Stop)
-        if ($matches.Count -eq 0) {
-            throw "Required script not found: $FileName"
-        }
-        if ($matches.Count -gt 1) {
-            $list = ($matches | Select-Object -ExpandProperty FullName) -join '; '
-            throw "Multiple matches found for ${FileName}: $list"
-        }
-        return $matches[0].FullName
-    }
-
     # Keep this wrapper ASCII-only so it works even in legacy Windows PowerShell encodings.
-    $installScript = Resolve-UniqueScriptPath $repoRoot 'install-codex-cli.ps1'
-    $noProxyScript = Resolve-UniqueScriptPath $repoRoot 'setup_no_proxy_windows.ps1'
+    # Depend only on scripts in the same folder so this installer can be copied around standalone.
+    $installScript = Join-Path $PSScriptRoot 'install-codex-cli.ps1'
+    $noProxyScript = Join-Path $PSScriptRoot 'setup_no_proxy_windows.ps1'
+
+    if (-not (Test-Path -LiteralPath $installScript)) {
+        throw "Required script not found next to installer: install-codex-cli.ps1"
+    }
+    if (-not (Test-Path -LiteralPath $noProxyScript)) {
+        throw "Required script not found next to installer: setup_no_proxy_windows.ps1"
+    }
 
     Write-Info "Installer script: $installScript"
     Write-Info "NO_PROXY setup script: $noProxyScript"

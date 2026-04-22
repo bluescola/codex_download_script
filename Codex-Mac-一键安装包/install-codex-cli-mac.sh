@@ -4,6 +4,7 @@ set -euo pipefail
 FORCE_NODE_REINSTALL=0
 FORCE_CODEX_REINSTALL=0
 SKIP_CRS_CONFIG=0
+SKIP_NO_PROXY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -19,6 +20,10 @@ while [[ $# -gt 0 ]]; do
       SKIP_CRS_CONFIG=1
       shift
       ;;
+    --skip-no-proxy)
+      SKIP_NO_PROXY=1
+      shift
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage: install-codex-cli-mac.sh [options]
@@ -27,6 +32,7 @@ Options:
   --force-node-reinstall   Force reinstall Node.js/npm (user-only install)
   --force-codex-reinstall  Force reinstall @openai/codex
   --skip-crs-config        Skip interactive CRS config generation
+  --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
   -h, --help               Show this help
 USAGE
       exit 0
@@ -388,6 +394,21 @@ AUTH
   log_ok "Persisted CRS_OAI_KEY in ~/.zshrc and ~/.bashrc"
 }
 
+configure_no_proxy() {
+  local script_dir no_proxy_script
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  no_proxy_script="$script_dir/setup_no_proxy_mac.sh"
+
+  if [[ ! -f "$no_proxy_script" ]]; then
+    log_warn "NO_PROXY setup script not found next to installer: $no_proxy_script"
+    log_warn "Skipping NO_PROXY/no_proxy configuration."
+    return 0
+  fi
+
+  log_info "Configuring NO_PROXY/no_proxy bypass..."
+  bash "$no_proxy_script"
+}
+
 main() {
   require_non_root
   require_macos
@@ -404,6 +425,10 @@ main() {
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
     configure_crs "$clean_existing_config"
+  fi
+
+  if [[ "$SKIP_NO_PROXY" -eq 0 ]]; then
+    configure_no_proxy
   fi
 
   printf '\n'

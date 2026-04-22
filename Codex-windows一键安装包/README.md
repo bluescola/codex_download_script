@@ -14,7 +14,7 @@
 它实际运行的是：
 - `install-codex-cli-and-setup-no-proxy.ps1`
   - Step 1：调用 `install-codex-cli.ps1`（安装/修复 Node、安装 codex、写入相关配置等）
-  - Step 2：调用仓库里的 `setup_no_proxy_windows.ps1`（把需要绕过代理的地址追加到 `NO_PROXY`，缺少才加，不重复）
+  - Step 2：调用同目录的 `setup_no_proxy_windows.ps1`（把需要绕过代理的地址追加到 `NO_PROXY`，缺少才加，不重复）
 
 适用场景：
 - 第一次安装 Codex CLI
@@ -47,4 +47,3 @@
 - `-Quiet`：静默安装（默认是被动安装 `/passive`）
 - `-Repair`：强制走修复流程
 - `-DownloadOnly`：只下载，不执行安装
-

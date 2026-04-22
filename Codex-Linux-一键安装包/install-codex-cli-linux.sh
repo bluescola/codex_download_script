@@ -5,6 +5,7 @@ FORCE_NODE_REINSTALL=0
 FORCE_CODEX_REINSTALL=0
 REMOVE_SYSTEM_CODEX=0
 SKIP_CRS_CONFIG=0
+SKIP_NO_PROXY=0
 NODE_ROOT="${HOME}/.local/node"
 NPM_PREFIX="${HOME}/.npm-global"
 
@@ -26,6 +27,10 @@ while [[ $# -gt 0 ]]; do
       SKIP_CRS_CONFIG=1
       shift
       ;;
+    --skip-no-proxy)
+      SKIP_NO_PROXY=1
+      shift
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage: install-codex-cli-linux.sh [options]
@@ -35,6 +40,7 @@ Options:
   --force-codex-reinstall  Force reinstall @openai/codex
   --remove-system-codex    Remove system-level @openai/codex (e.g. /usr/lib/node_modules)
   --skip-crs-config        Skip interactive CRS config generation
+  --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
   -h, --help               Show this help
 USAGE
       exit 0
@@ -472,6 +478,21 @@ AUTH
   log_ok "Persisted CRS_OAI_KEY in ~/.bashrc and ~/.zshrc"
 }
 
+configure_no_proxy() {
+  local script_dir no_proxy_script
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  no_proxy_script="$script_dir/setup_no_proxy_linux.sh"
+
+  if [[ ! -f "$no_proxy_script" ]]; then
+    log_warn "NO_PROXY setup script not found next to installer: $no_proxy_script"
+    log_warn "Skipping NO_PROXY/no_proxy configuration."
+    return 0
+  fi
+
+  log_info "Configuring NO_PROXY/no_proxy bypass..."
+  bash "$no_proxy_script"
+}
+
 main() {
   local clean_existing_config=0
   if test_preexisting_node_npm_codex; then
@@ -488,6 +509,10 @@ main() {
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
     configure_crs "$clean_existing_config"
+  fi
+
+  if [[ "$SKIP_NO_PROXY" -eq 0 ]]; then
+    configure_no_proxy
   fi
 
   printf '\n'
