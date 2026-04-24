@@ -1,0 +1,3 @@
+# Codex CLI local state (config/cache/memories); keep out of git.
+.codex/
+
