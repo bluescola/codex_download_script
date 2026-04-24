@@ -222,7 +222,18 @@ install_node_user() {
   esac
 
   local lts_version
-  lts_version="$(curl -fsSL https://nodejs.org/dist/index.tab | awk -F'\t' 'NR>1 && $9 != "-" {print $1; exit}')"
+  # NOTE: Do not exit early in the consumer (awk) when piping from curl.
+  # Exiting early closes the pipe, curl then errors with:
+  #   curl: (23) Failure writing output to destination
+  # which is fatal under `set -o pipefail`.
+  lts_version="$(
+    curl -fsSL https://nodejs.org/dist/index.tab |
+      awk -F'\t' '
+        NR==1 { next }
+        $9 != "-" && !found { v=$1; found=1 }
+        END { if (found) print v; else exit 1 }
+      '
+  )"
   if [[ -z "$lts_version" ]]; then
     echo "[ERROR] Failed to resolve Node.js LTS version." >&2
     exit 1

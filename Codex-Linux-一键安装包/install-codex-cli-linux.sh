@@ -205,7 +205,18 @@ install_node_user() {
   esac
 
   local lts_version
-  lts_version="$(curl -fsSL https://nodejs.org/dist/index.tab | awk -F'\t' 'NR>1 && $9 != "-" {print $1; exit}')"
+  # NOTE: Do not exit early in the consumer (awk) when piping from curl.
+  # Exiting early closes the pipe, curl then errors with:
+  #   curl: (23) Failure writing output to destination
+  # which is fatal under `set -o pipefail`.
+  lts_version="$(
+    curl -fsSL https://nodejs.org/dist/index.tab |
+      awk -F'\t' '
+        NR==1 { next }
+        $9 != "-" && !found { v=$1; found=1 }
+        END { if (found) print v; else exit 1 }
+      '
+  )"
   if [[ -z "$lts_version" ]]; then
     echo "[ERROR] Failed to resolve Node.js LTS version." >&2
     exit 1
@@ -236,15 +247,22 @@ install_node_user() {
 }
 
 ensure_node_npm() {
-  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && [[ -x "$NODE_ROOT/current/bin/node" ]] && [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
-    log_info "Node.js and npm already installed (user directory)."
-    log_ok "Node.js: $("$NODE_ROOT/current/bin/node" -v)"
-    log_ok "npm: $("$NODE_ROOT/current/bin/npm" -v)"
+  # Prefer system Node.js/npm when available: downloading Node in user space is
+  # slower and unnecessary on most Ubuntu servers.
+  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && cmd_exists node && cmd_exists npm; then
+    log_info "Using existing Node.js/npm from PATH."
+    log_ok "Node.js: $(node -v)"
+    log_ok "npm: $(npm -v)"
     return 0
   fi
 
-  if cmd_exists node && cmd_exists npm && [[ "$FORCE_NODE_REINSTALL" -eq 0 ]]; then
-    log_warn "System Node.js/npm detected, but user-level install is required. Installing user copy..."
+  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && [[ -x "$NODE_ROOT/current/bin/node" ]] && [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
+    export PATH="$NODE_ROOT/current/bin:$PATH"
+    hash -r
+    log_info "Using user Node.js and npm under: $NODE_ROOT/current/bin"
+    log_ok "Node.js: $("$NODE_ROOT/current/bin/node" -v)"
+    log_ok "npm: $("$NODE_ROOT/current/bin/npm" -v)"
+    return 0
   fi
 
   if [[ "$FORCE_NODE_REINSTALL" -eq 1 && -d "$NODE_ROOT" ]]; then
@@ -297,6 +315,7 @@ ensure_user_npm_prefix() {
     node_bin="$NODE_ROOT/current/bin"
   fi
   export PATH="$npm_bin:$PATH"
+  hash -r
 
   local block_start="# >>> codex user paths >>>"
   local block_end="# <<< codex user paths <<<"

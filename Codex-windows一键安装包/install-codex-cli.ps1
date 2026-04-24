@@ -433,12 +433,13 @@ function Install-NodeUserZip {
 }
 
 function Ensure-Node {
-    if ((Node-And-Npm-Ready) -and -not $ForceNodeReinstall) {
-        Ensure-UserPathContains $UserNodeRoot
-        if (-not (($env:Path -split ';') -contains $UserNodeRoot)) {
-            $env:Path = "$UserNodeRoot;$env:Path"
-        }
-        Write-Info 'Node.js and npm already present (user install).'
+    # Prefer any existing Node/npm available on PATH (system install or other managed installs).
+    # Only fall back to downloading a user-local Node zip if Node/npm are not present.
+    Refresh-Path
+    if ((Test-PreexistingNodeAndNpm) -and -not $ForceNodeReinstall) {
+        Write-Info 'Node.js and npm already present.'
+        Write-Ok ("Node.js: " + (node -v))
+        Write-Ok ("npm: " + (npm -v))
         return
     }
 
@@ -726,6 +727,7 @@ function Install-CodexPackage {
 
 function Ensure-Codex {
     Ensure-NpmUserPrefix
+    $npmBinDir = Resolve-NpmGlobalBinDir
 
     if ($ForceCodexReinstall) {
         Write-Info 'Force reinstall requested: uninstalling existing Codex CLI...'
@@ -735,14 +737,17 @@ function Ensure-Codex {
     $existingCodexVersion = $null
     if (-not $ForceCodexReinstall) {
         try {
-            $existingVersionResult = Invoke-CodexVersionCommand 'codex.cmd'
-            $existingVersionFailure = New-CodexVersionFailureMessage 'codex.cmd' $existingVersionResult
-            if (-not $existingVersionFailure) {
-                $existingCodexVersion = $existingVersionResult.OutputText.Trim()
-            }
-            else {
-                Write-WarnMsg "Existing Codex CLI probe failed: $existingVersionFailure Reinstalling package."
-                $existingCodexVersion = $null
+            $userCodexCmd = Join-Path $npmBinDir 'codex.cmd'
+            if (Test-Path $userCodexCmd) {
+                $existingVersionResult = Invoke-CodexVersionCommand $userCodexCmd
+                $existingVersionFailure = New-CodexVersionFailureMessage $userCodexCmd $existingVersionResult
+                if (-not $existingVersionFailure) {
+                    $existingCodexVersion = $existingVersionResult.OutputText.Trim()
+                }
+                else {
+                    Write-WarnMsg "User Codex CLI probe failed: $existingVersionFailure Reinstalling package."
+                    $existingCodexVersion = $null
+                }
             }
         }
         catch {
@@ -757,7 +762,6 @@ function Ensure-Codex {
         Install-CodexPackage
     }
 
-    $npmBinDir = Resolve-NpmGlobalBinDir
     Ensure-UserPathContains $npmBinDir
     $nodeInstallDir = Resolve-NodeInstallDir
     if ($nodeInstallDir) {
