@@ -162,7 +162,7 @@ read_required() {
       printf '%s' "$value"
       return 0
     fi
-    log_warn "Input cannot be empty."
+    log_warn "Input cannot be empty." >&2
   done
 }
 
@@ -171,7 +171,9 @@ read_secret_required() {
   local value=''
   while true; do
     read -r -s -p "$prompt" value
-    printf '\n'
+    # Print the newline to the terminal/stderr so it won't be captured by
+    # command substitution (e.g. crs_key="$(read_secret_required ...)").
+    printf '\n' >&2
     # Drop control chars (arrow keys, etc) and trim whitespace.
     value="$(printf '%s' "$value" | tr -d '\000-\037\177')"
     value="${value#${value%%[![:space:]]*}}"
@@ -180,7 +182,7 @@ read_secret_required() {
       printf '%s' "$value"
       return 0
     fi
-    log_warn "Input cannot be empty."
+    log_warn "Input cannot be empty." >&2
   done
 }
 
