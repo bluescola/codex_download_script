@@ -3,6 +3,7 @@ set -euo pipefail
 
 FORCE_NODE_REINSTALL=0
 FORCE_CODEX_REINSTALL=0
+REMOVE_SYSTEM_CODEX=0
 SKIP_CRS_CONFIG=0
 SKIP_NO_PROXY=0
 
@@ -14,6 +15,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --force-codex-reinstall)
       FORCE_CODEX_REINSTALL=1
+      shift
+      ;;
+    --remove-system-codex)
+      REMOVE_SYSTEM_CODEX=1
       shift
       ;;
     --skip-crs-config)
@@ -31,6 +36,7 @@ Usage: install-codex-cli-mac.sh [options]
 Options:
   --force-node-reinstall   Force reinstall Node.js/npm (user-only install)
   --force-codex-reinstall  Force reinstall @openai/codex
+  --remove-system-codex    Compatibility flag; system-level @openai/codex removal is automatic
   --skip-crs-config        Skip interactive CRS config generation
   --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
   -h, --help               Show this help
@@ -298,37 +304,234 @@ ensure_npm_user_prefix() {
   log_ok "npm global prefix: $(npm config get prefix)"
 }
 
+trim_trailing_slash() {
+  local p="$1"
+  while [[ "$p" != "/" && "$p" == */ ]]; do
+    p="${p%/}"
+  done
+  printf '%s\n' "$p"
+}
+
+path_under() {
+  local path root
+  path="$(trim_trailing_slash "$1")"
+  root="$(trim_trailing_slash "$2")"
+
+  [[ -n "$path" && -n "$root" ]] || return 1
+  [[ "$path" == "$root" || "$path" == "$root/"* ]]
+}
+
+is_user_npm_path() {
+  local path="$1"
+  path_under "$path" "$NPM_PREFIX" || path_under "$path" "$HOME"
+}
+
+is_system_prefix_candidate() {
+  local prefix
+  prefix="$(trim_trailing_slash "$1")"
+  [[ -n "$prefix" ]] || return 1
+  is_user_npm_path "$prefix" && return 1
+
+  case "$prefix" in
+    /opt/homebrew|/usr/local|/opt/local|/usr)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+known_system_npm_prefixes() {
+  printf '%s\n' "/opt/homebrew" "/usr/local" "/opt/local" "/usr"
+
+  local npm_prefix
+  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  if is_system_prefix_candidate "$npm_prefix"; then
+    printf '%s\n' "$(trim_trailing_slash "$npm_prefix")"
+  fi
+}
+
+add_unique_system_prefix() {
+  local prefix="$1"
+  prefix="$(trim_trailing_slash "$prefix")"
+  is_system_prefix_candidate "$prefix" || return 0
+
+  local existing
+  for existing in "${SYSTEM_CODEX_PREFIXES[@]}"; do
+    if [[ "$existing" == "$prefix" ]]; then
+      return 0
+    fi
+  done
+
+  SYSTEM_CODEX_PREFIXES+=("$prefix")
+}
+
+find_system_codex_prefixes() {
+  SYSTEM_CODEX_PREFIXES=()
+
+  local prefix cmd_path
+  while IFS= read -r prefix; do
+    prefix="$(trim_trailing_slash "$prefix")"
+    [[ -n "$prefix" ]] || continue
+
+    if [[ -e "$prefix/bin/codex" || -L "$prefix/bin/codex" || -e "$prefix/lib/node_modules/@openai/codex" ]]; then
+      add_unique_system_prefix "$prefix"
+    fi
+  done < <(known_system_npm_prefixes)
+
+  while IFS= read -r cmd_path; do
+    [[ -n "$cmd_path" ]] || continue
+    is_user_npm_path "$cmd_path" && continue
+
+    if [[ "$cmd_path" == */bin/codex ]]; then
+      add_unique_system_prefix "${cmd_path%/bin/codex}"
+    fi
+
+    while IFS= read -r prefix; do
+      prefix="$(trim_trailing_slash "$prefix")"
+      [[ -n "$prefix" ]] || continue
+
+      if path_under "$cmd_path" "$prefix/bin"; then
+        add_unique_system_prefix "$prefix"
+        break
+      fi
+    done < <(known_system_npm_prefixes)
+  done < <(type -P -a codex 2>/dev/null || true)
+}
+
+run_with_optional_sudo() {
+  if "$@"; then
+    return 0
+  fi
+
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && cmd_exists sudo; then
+    if sudo "$@"; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+remove_system_codex_path() {
+  local target="$1"
+  local prefix="$2"
+
+  if ! path_under "$target" "$prefix"; then
+    echo "[ERROR] Refusing to remove path outside system npm prefix: $target" >&2
+    exit 1
+  fi
+
+  [[ -e "$target" || -L "$target" ]] || return 0
+
+  if [[ -d "$target" && ! -L "$target" ]]; then
+    if run_with_optional_sudo rm -rf "$target"; then
+      log_info "Removed system Codex residue: $target"
+      return 0
+    fi
+  else
+    if run_with_optional_sudo rm -f "$target"; then
+      log_info "Removed system Codex residue: $target"
+      return 0
+    fi
+  fi
+
+  log_warn "Failed to remove system Codex residue: $target"
+  return 1
+}
+
+uninstall_system_codex_at_prefix() {
+  local prefix="$1"
+  local npm_cmd
+  npm_cmd="$(command -v npm 2>/dev/null || true)"
+
+  [[ -n "$npm_cmd" ]] || {
+    log_warn "npm was not found; cannot uninstall system-level Codex with npm."
+    return 1
+  }
+
+  log_info "Uninstalling system-level Codex CLI from npm prefix: $prefix"
+  if "$npm_cmd" uninstall -g --prefix "$prefix" @openai/codex >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && cmd_exists sudo; then
+    sudo "$npm_cmd" uninstall -g --prefix "$prefix" @openai/codex >/dev/null 2>&1 || return 1
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_no_system_codex() {
+  find_system_codex_prefixes
+  if ((${#SYSTEM_CODEX_PREFIXES[@]} == 0)); then
+    log_info "No system-level Codex CLI detected."
+    return 0
+  fi
+
+  local prefix
+  for prefix in "${SYSTEM_CODEX_PREFIXES[@]}"; do
+    log_warn "Detected system-level Codex CLI: $prefix"
+  done
+
+  for prefix in "${SYSTEM_CODEX_PREFIXES[@]}"; do
+    uninstall_system_codex_at_prefix "$prefix" || log_warn "npm uninstall did not fully remove Codex from: $prefix"
+    remove_system_codex_path "$prefix/bin/codex" "$prefix" || true
+    remove_system_codex_path "$prefix/lib/node_modules/@openai/codex" "$prefix" || true
+  done
+
+  find_system_codex_prefixes
+  if ((${#SYSTEM_CODEX_PREFIXES[@]} > 0)); then
+    echo "[ERROR] System-level Codex CLI is still present:" >&2
+    for prefix in "${SYSTEM_CODEX_PREFIXES[@]}"; do
+      echo "  - $prefix" >&2
+    done
+    echo "[ERROR] Remove it with sudo/admin rights and rerun this installer." >&2
+    exit 1
+  fi
+
+  log_ok "System-level Codex CLI removed."
+}
+
 ensure_codex() {
+  local npm_bin="$NPM_PREFIX/bin"
+
   if [[ "$FORCE_CODEX_REINSTALL" -eq 1 ]]; then
-    log_info "Force reinstall enabled: removing existing Codex CLI..."
+    log_info "Force reinstall enabled: removing existing Codex CLI in user prefix..."
     npm uninstall -g @openai/codex >/dev/null 2>&1 || true
   else
-    if cmd_exists codex; then
-      if codex --version >/dev/null 2>&1; then
-        log_info "Codex CLI already installed: $(codex --version)"
+    if [[ -x "$npm_bin/codex" ]]; then
+      if "$npm_bin/codex" --version >/dev/null 2>&1; then
+        log_info "Codex CLI already installed in user prefix: $("$npm_bin/codex" --version)"
         return 0
       fi
-      log_warn "codex exists but failed to run; will reinstall."
+      log_warn "codex exists in user prefix but failed to run; will reinstall."
     fi
   fi
 
   log_info "Installing Codex CLI (user npm prefix)..."
   npm i -g @openai/codex
 
-  local npm_bin="$NPM_PREFIX/bin"
-  if cmd_exists codex; then
-    log_ok "Codex CLI: $(codex --version)"
-    return 0
-  fi
-
   if [[ -x "$npm_bin/codex" ]]; then
     log_ok "Codex CLI: $("$npm_bin/codex" --version)"
-    log_warn "codex is not in PATH yet. Open a new terminal or run: source ~/.zshrc"
-    return 0
+  else
+    echo "[ERROR] codex command not found under user npm prefix after installation." >&2
+    exit 1
   fi
 
-  echo "[ERROR] codex command not found after installation." >&2
-  exit 1
+  if cmd_exists codex; then
+    local resolved
+    resolved="$(command -v codex)"
+    if [[ "$resolved" != "$npm_bin/codex" ]]; then
+      log_warn "PATH resolves codex to: $resolved"
+      log_warn "Expected user prefix: $npm_bin/codex"
+      log_warn "Open a new terminal or ensure PATH has $npm_bin first."
+    fi
+  else
+    log_warn "codex is not in PATH yet. Open a new terminal or run: source ~/.zshrc"
+  fi
 }
 
 upsert_env_in_file() {
@@ -439,6 +642,10 @@ main() {
 
   log_info "Starting one-click install for macOS Codex CLI package..."
   ensure_node_npm
+  if [[ "$REMOVE_SYSTEM_CODEX" -eq 1 ]]; then
+    log_info "--remove-system-codex is now automatic; checking system-level Codex CLI."
+  fi
+  ensure_no_system_codex
   ensure_npm_user_prefix
   ensure_codex
 

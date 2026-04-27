@@ -38,7 +38,7 @@ Usage: install-codex-cli-linux.sh [options]
 Options:
   --force-node-reinstall   Force reinstall Node.js/npm
   --force-codex-reinstall  Force reinstall @openai/codex
-  --remove-system-codex    Remove system-level @openai/codex (e.g. /usr/lib/node_modules)
+  --remove-system-codex    Compatibility flag; system-level @openai/codex removal is automatic
   --skip-crs-config        Skip interactive CRS config generation
   --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
   -h, --help               Show this help
@@ -334,6 +334,197 @@ ensure_user_npm_prefix() {
   log_ok "Ensured PATH includes: $npm_bin"
 }
 
+trim_trailing_slash() {
+  local p="$1"
+  while [[ "$p" != "/" && "$p" == */ ]]; do
+    p="${p%/}"
+  done
+  printf '%s\n' "$p"
+}
+
+path_under() {
+  local path root
+  path="$(trim_trailing_slash "$1")"
+  root="$(trim_trailing_slash "$2")"
+
+  [[ -n "$path" && -n "$root" ]] || return 1
+  [[ "$path" == "$root" || "$path" == "$root/"* ]]
+}
+
+is_user_npm_path() {
+  local path="$1"
+  path_under "$path" "$NPM_PREFIX" || path_under "$path" "$HOME"
+}
+
+is_system_prefix_candidate() {
+  local prefix
+  prefix="$(trim_trailing_slash "$1")"
+  [[ -n "$prefix" ]] || return 1
+  is_user_npm_path "$prefix" && return 1
+
+  case "$prefix" in
+    /usr|/usr/local|/opt/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+known_system_npm_prefixes() {
+  printf '%s\n' "/usr/local" "/usr" "/opt/nodejs" "/opt/npm"
+
+  local npm_prefix
+  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  if is_system_prefix_candidate "$npm_prefix"; then
+    printf '%s\n' "$(trim_trailing_slash "$npm_prefix")"
+  fi
+}
+
+add_unique_system_prefix() {
+  local prefix="$1"
+  prefix="$(trim_trailing_slash "$prefix")"
+  is_system_prefix_candidate "$prefix" || return 0
+
+  local existing
+  for existing in "${SYSTEM_CODEX_PREFIXES[@]:-}"; do
+    if [[ "$existing" == "$prefix" ]]; then
+      return 0
+    fi
+  done
+
+  SYSTEM_CODEX_PREFIXES+=("$prefix")
+}
+
+find_system_codex_prefixes() {
+  SYSTEM_CODEX_PREFIXES=()
+
+  local prefix cmd_path
+  while IFS= read -r prefix; do
+    prefix="$(trim_trailing_slash "$prefix")"
+    [[ -n "$prefix" ]] || continue
+
+    if [[ -e "$prefix/bin/codex" || -L "$prefix/bin/codex" || -e "$prefix/lib/node_modules/@openai/codex" ]]; then
+      add_unique_system_prefix "$prefix"
+    fi
+  done < <(known_system_npm_prefixes)
+
+  while IFS= read -r cmd_path; do
+    [[ -n "$cmd_path" ]] || continue
+    is_user_npm_path "$cmd_path" && continue
+
+    if [[ "$cmd_path" == */bin/codex ]]; then
+      add_unique_system_prefix "${cmd_path%/bin/codex}"
+    fi
+
+    while IFS= read -r prefix; do
+      prefix="$(trim_trailing_slash "$prefix")"
+      [[ -n "$prefix" ]] || continue
+
+      if path_under "$cmd_path" "$prefix/bin"; then
+        add_unique_system_prefix "$prefix"
+        break
+      fi
+    done < <(known_system_npm_prefixes)
+  done < <(type -P -a codex 2>/dev/null || true)
+}
+
+run_with_optional_sudo() {
+  if "$@"; then
+    return 0
+  fi
+
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && cmd_exists sudo; then
+    if sudo "$@"; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+remove_system_codex_path() {
+  local target="$1"
+  local prefix="$2"
+
+  if ! path_under "$target" "$prefix"; then
+    echo "[ERROR] Refusing to remove path outside system npm prefix: $target" >&2
+    exit 1
+  fi
+
+  [[ -e "$target" || -L "$target" ]] || return 0
+
+  if [[ -d "$target" && ! -L "$target" ]]; then
+    if run_with_optional_sudo rm -rf "$target"; then
+      log_info "Removed system Codex residue: $target"
+      return 0
+    fi
+  else
+    if run_with_optional_sudo rm -f "$target"; then
+      log_info "Removed system Codex residue: $target"
+      return 0
+    fi
+  fi
+
+  log_warn "Failed to remove system Codex residue: $target"
+  return 1
+}
+
+uninstall_system_codex_at_prefix() {
+  local prefix="$1"
+  local npm_cmd
+  npm_cmd="$(command -v npm 2>/dev/null || true)"
+
+  [[ -n "$npm_cmd" ]] || {
+    log_warn "npm was not found; cannot uninstall system-level Codex with npm."
+    return 1
+  }
+
+  log_info "Uninstalling system-level Codex CLI from npm prefix: $prefix"
+  if "$npm_cmd" uninstall -g --prefix "$prefix" @openai/codex >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && cmd_exists sudo; then
+    sudo "$npm_cmd" uninstall -g --prefix "$prefix" @openai/codex >/dev/null 2>&1 || return 1
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_no_system_codex() {
+  find_system_codex_prefixes
+  if ((${#SYSTEM_CODEX_PREFIXES[@]} == 0)); then
+    log_info "No system-level Codex CLI detected."
+    return 0
+  fi
+
+  local prefix
+  for prefix in "${SYSTEM_CODEX_PREFIXES[@]}"; do
+    log_warn "Detected system-level Codex CLI: $prefix"
+  done
+
+  for prefix in "${SYSTEM_CODEX_PREFIXES[@]}"; do
+    uninstall_system_codex_at_prefix "$prefix" || log_warn "npm uninstall did not fully remove Codex from: $prefix"
+    remove_system_codex_path "$prefix/bin/codex" "$prefix" || true
+    remove_system_codex_path "$prefix/lib/node_modules/@openai/codex" "$prefix" || true
+  done
+
+  find_system_codex_prefixes
+  if ((${#SYSTEM_CODEX_PREFIXES[@]} > 0)); then
+    echo "[ERROR] System-level Codex CLI is still present:" >&2
+    for prefix in "${SYSTEM_CODEX_PREFIXES[@]}"; do
+      echo "  - $prefix" >&2
+    done
+    echo "[ERROR] Remove it with sudo/admin rights and rerun this installer." >&2
+    exit 1
+  fi
+
+  log_ok "System-level Codex CLI removed."
+}
+
 ensure_codex() {
   local npm_prefix npm_bin
   npm_prefix="$(npm config get prefix 2>/dev/null || true)"
@@ -381,27 +572,6 @@ ensure_codex() {
     log_warn "codex is not in current PATH. Open a new shell or add this to your shell profile:"
     printf 'export PATH="%s:$PATH"\n' "$npm_bin"
   fi
-}
-
-remove_system_codex() {
-  local use_sudo
-  local found=0
-
-  # Common system-level npm global locations.
-  if [[ -d "/usr/lib/node_modules/@openai/codex" ]]; then
-    found=1
-  elif [[ -d "/usr/local/lib/node_modules/@openai/codex" ]]; then
-    found=1
-  fi
-
-  if [[ "$found" -eq 0 ]]; then
-    log_info "No system-level Codex CLI found under /usr or /usr/local."
-    return 0
-  fi
-
-  log_info "Removing system-level Codex CLI with sudo..."
-  use_sudo="$(need_sudo)"
-  ${use_sudo}npm uninstall -g @openai/codex >/dev/null 2>&1 || true
 }
 
 upsert_env_in_file() {
@@ -523,8 +693,9 @@ main() {
   log_info "Starting one-click install for Linux Codex CLI package..."
   ensure_node_npm
   if [[ "$REMOVE_SYSTEM_CODEX" -eq 1 ]]; then
-    remove_system_codex
+    log_info "--remove-system-codex is now automatic; checking system-level Codex CLI."
   fi
+  ensure_no_system_codex
   ensure_user_npm_prefix
   ensure_codex
 

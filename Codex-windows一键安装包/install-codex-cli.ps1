@@ -1,7 +1,9 @@
 param(
     [switch]$ForceNodeReinstall,
     [switch]$ForceCodexReinstall,
-    [switch]$SkipCrsConfig
+    [switch]$SkipCrsConfig,
+    [string]$UninstallSystemCodexPrefix,
+    [string]$NpmCommandPath
 )
 
 Set-StrictMode -Version Latest
@@ -11,6 +13,7 @@ $UserNodeRoot = if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
 } else {
     Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
 }
+$script:NpmCommandOverride = $NpmCommandPath
 
 function Write-Info([string]$Message) {
     Write-Host "[INFO] $Message" -ForegroundColor Cyan
@@ -171,6 +174,390 @@ function Resolve-NpmGlobalBinDir {
     }
 
     return (Join-Path $env:APPDATA 'npm')
+}
+
+function Normalize-ComparablePath([string]$PathValue) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $null
+    }
+
+    try {
+        return ([System.IO.Path]::GetFullPath($PathValue).TrimEnd([char[]]@('\', '/')))
+    }
+    catch {
+        return ($PathValue.Trim().TrimEnd([char[]]@('\', '/')))
+    }
+}
+
+function Test-PathUnderRoot([string]$PathValue, [string]$RootValue) {
+    $path = Normalize-ComparablePath $PathValue
+    $root = Normalize-ComparablePath $RootValue
+
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) {
+        return $false
+    }
+
+    if ($path -ieq $root) {
+        return $true
+    }
+
+    return $path.StartsWith("$root\", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-KnownSystemNpmPrefixes {
+    $prefixes = @()
+    $programFiles = [Environment]::GetEnvironmentVariable('ProgramFiles')
+    $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+    $programData = [Environment]::GetEnvironmentVariable('ProgramData')
+
+    if (-not [string]::IsNullOrWhiteSpace($programFiles)) {
+        $prefixes += (Join-Path $programFiles 'nodejs')
+    }
+    if (-not [string]::IsNullOrWhiteSpace($programFilesX86)) {
+        $prefixes += (Join-Path $programFilesX86 'nodejs')
+    }
+    if (-not [string]::IsNullOrWhiteSpace($programData)) {
+        $prefixes += (Join-Path $programData 'npm')
+        $prefixes += (Join-Path $programData 'nodejs')
+    }
+
+    $seen = @{}
+    $result = @()
+    foreach ($prefix in $prefixes) {
+        $normalized = Normalize-ComparablePath $prefix
+        if ([string]::IsNullOrWhiteSpace($normalized)) {
+            continue
+        }
+
+        $key = $normalized.ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $result += $normalized
+        }
+    }
+
+    return $result
+}
+
+function Test-IsSystemInstallPath([string]$PathValue) {
+    foreach ($prefix in Get-KnownSystemNpmPrefixes) {
+        if (Test-PathUnderRoot $PathValue $prefix) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-IsKnownSystemNpmPrefix([string]$PathValue) {
+    $path = Normalize-ComparablePath $PathValue
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        return $false
+    }
+
+    foreach ($prefix in Get-KnownSystemNpmPrefixes) {
+        if ($path -ieq $prefix) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-IsSystemLevelCodexPath([string]$PathValue, [string]$UserNpmBinDir) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $false
+    }
+
+    if ((-not [string]::IsNullOrWhiteSpace($UserNpmBinDir)) -and (Test-PathUnderRoot $PathValue $UserNpmBinDir)) {
+        return $false
+    }
+
+    return (Test-IsSystemInstallPath $PathValue)
+}
+
+function Resolve-NpmCommandPath {
+    if ((-not [string]::IsNullOrWhiteSpace($script:NpmCommandOverride)) -and (Test-Path -LiteralPath $script:NpmCommandOverride)) {
+        return $script:NpmCommandOverride
+    }
+
+    foreach ($name in @('npm.cmd', 'npm')) {
+        $cmd = @(Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($cmd.Count -eq 0) {
+            continue
+        }
+
+        foreach ($propertyName in @('Path', 'Source')) {
+            $matches = @($cmd[0].PSObject.Properties.Match($propertyName))
+            if ($matches.Count -gt 0) {
+                $value = [string]$matches[0].Value
+                if (-not [string]::IsNullOrWhiteSpace($value)) {
+                    return $value
+                }
+            }
+        }
+    }
+
+    return $null
+}
+
+function Add-SystemCodexCandidate {
+    param(
+        [System.Collections.Generic.List[object]]$Candidates,
+        [hashtable]$Seen,
+        [Parameter(Mandatory = $true)]
+        [string]$CommandPath,
+        [string]$PrefixDir,
+        [string]$UserNpmBinDir
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CommandPath) -or -not (Test-Path -LiteralPath $CommandPath)) {
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PrefixDir)) {
+        $PrefixDir = Split-Path -Parent $CommandPath
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PrefixDir) -or -not (Test-IsSystemLevelCodexPath $CommandPath $UserNpmBinDir)) {
+        return
+    }
+
+    $normalizedPrefix = Normalize-ComparablePath $PrefixDir
+    if ([string]::IsNullOrWhiteSpace($normalizedPrefix) -or -not (Test-IsKnownSystemNpmPrefix $normalizedPrefix)) {
+        return
+    }
+
+    $key = $normalizedPrefix.ToLowerInvariant()
+    if ($Seen.ContainsKey($key)) {
+        return
+    }
+
+    $Seen[$key] = $true
+    [void]$Candidates.Add([pscustomobject]@{
+        PrefixDir = $normalizedPrefix
+        CommandPath = (Normalize-ComparablePath $CommandPath)
+    })
+}
+
+function Find-SystemCodexInstalls([string]$UserNpmBinDir) {
+    $candidates = New-Object 'System.Collections.Generic.List[object]'
+    $seen = @{}
+
+    foreach ($name in @('codex', 'codex.cmd', 'codex.ps1')) {
+        $commands = @(Get-Command $name -All -ErrorAction SilentlyContinue)
+        foreach ($cmd in $commands) {
+            $commandPath = $null
+            foreach ($propertyName in @('Path', 'Source')) {
+                $matches = @($cmd.PSObject.Properties.Match($propertyName))
+                if ($matches.Count -gt 0) {
+                    $value = [string]$matches[0].Value
+                    if (-not [string]::IsNullOrWhiteSpace($value)) {
+                        $commandPath = $value
+                        break
+                    }
+                }
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($commandPath)) {
+                Add-SystemCodexCandidate -Candidates $candidates -Seen $seen -CommandPath $commandPath -UserNpmBinDir $UserNpmBinDir
+            }
+        }
+    }
+
+    $prefixSeen = @{}
+    foreach ($prefix in Get-KnownSystemNpmPrefixes) {
+        $normalizedPrefix = Normalize-ComparablePath $prefix
+        if ([string]::IsNullOrWhiteSpace($normalizedPrefix)) {
+            continue
+        }
+
+        $prefixKey = $normalizedPrefix.ToLowerInvariant()
+        if ($prefixSeen.ContainsKey($prefixKey)) {
+            continue
+        }
+        $prefixSeen[$prefixKey] = $true
+
+        foreach ($fileName in @('codex.cmd', 'codex.ps1', 'codex')) {
+            $candidatePath = Join-Path $normalizedPrefix $fileName
+            Add-SystemCodexCandidate -Candidates $candidates -Seen $seen -CommandPath $candidatePath -PrefixDir $normalizedPrefix -UserNpmBinDir $UserNpmBinDir
+        }
+
+        $packageDir = Join-Path $normalizedPrefix 'node_modules\@openai\codex'
+        Add-SystemCodexCandidate -Candidates $candidates -Seen $seen -CommandPath $packageDir -PrefixDir $normalizedPrefix -UserNpmBinDir $UserNpmBinDir
+    }
+
+    return $candidates.ToArray()
+}
+
+function Test-IsAdministrator {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Remove-KnownSystemCodexFiles([string]$PrefixDir) {
+    $prefix = Normalize-ComparablePath $PrefixDir
+    if ([string]::IsNullOrWhiteSpace($prefix) -or -not (Test-IsKnownSystemNpmPrefix $prefix)) {
+        throw "Refusing to remove Codex files outside a system install prefix: $PrefixDir"
+    }
+
+    $targets = @(
+        (Join-Path $prefix 'codex'),
+        (Join-Path $prefix 'codex.cmd'),
+        (Join-Path $prefix 'codex.ps1'),
+        (Join-Path $prefix 'node_modules\@openai\codex')
+    )
+
+    foreach ($target in $targets) {
+        if (-not (Test-Path -LiteralPath $target)) {
+            continue
+        }
+        if (-not (Test-PathUnderRoot $target $prefix)) {
+            throw "Refusing to remove Codex target outside prefix: $target"
+        }
+
+        try {
+            $item = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+            if ($item.PSIsContainer) {
+                Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+            }
+            else {
+                Remove-Item -LiteralPath $target -Force -ErrorAction Stop
+            }
+            Write-Info "Removed system Codex residue: $target"
+        }
+        catch {
+            Write-WarnMsg "Failed to remove system Codex residue ${target}: $($_.Exception.Message)"
+        }
+    }
+}
+
+function ConvertTo-PowerShellSingleQuotedLiteral([string]$Value) {
+    if ($null -eq $Value) {
+        return '$null'
+    }
+
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function Invoke-NpmUninstallCodexAtPrefix([string]$PrefixDir) {
+    $prefix = Normalize-ComparablePath $PrefixDir
+    if ([string]::IsNullOrWhiteSpace($prefix) -or -not (Test-IsKnownSystemNpmPrefix $prefix)) {
+        throw "Refusing npm Codex uninstall outside a system install prefix: $PrefixDir"
+    }
+
+    $npmPath = Resolve-NpmCommandPath
+    if ([string]::IsNullOrWhiteSpace($npmPath)) {
+        Write-WarnMsg 'npm was not found; cannot uninstall system-level Codex with npm.'
+        return $false
+    }
+
+    Write-Info "Uninstalling system-level Codex CLI from npm prefix: $prefix"
+    $savedErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $npmPath uninstall -g --prefix $prefix '@openai/codex'
+        $uninstallExit = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorAction
+    }
+
+    if ($uninstallExit -ne 0) {
+        Write-WarnMsg "npm uninstall for system-level Codex returned exit code $uninstallExit."
+        return $false
+    }
+
+    return $true
+}
+
+function Invoke-ElevatedSystemCodexUninstall([string]$PrefixDir) {
+    $prefix = Normalize-ComparablePath $PrefixDir
+    if ([string]::IsNullOrWhiteSpace($prefix) -or -not (Test-IsKnownSystemNpmPrefix $prefix)) {
+        throw "Refusing elevated Codex uninstall outside a system install prefix: $PrefixDir"
+    }
+
+    $npmPath = Resolve-NpmCommandPath
+    if ([string]::IsNullOrWhiteSpace($npmPath)) {
+        throw 'npm was not found; cannot launch elevated system-level Codex uninstall.'
+    }
+
+    $powershellPath = @(Get-Command powershell.exe -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($powershellPath.Count -eq 0) {
+        throw 'powershell.exe was not found; cannot launch elevated system-level Codex uninstall.'
+    }
+
+    $scriptPath = if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        $PSCommandPath
+    }
+    else {
+        $MyInvocation.MyCommand.Path
+    }
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+        throw 'Current script path could not be resolved for elevated system-level Codex uninstall.'
+    }
+
+    $scriptLiteral = ConvertTo-PowerShellSingleQuotedLiteral $scriptPath
+    $prefixLiteral = ConvertTo-PowerShellSingleQuotedLiteral $prefix
+    $npmLiteral = ConvertTo-PowerShellSingleQuotedLiteral $npmPath
+    $payload = "& $scriptLiteral -UninstallSystemCodexPrefix $prefixLiteral -NpmCommandPath $npmLiteral"
+    $encodedPayload = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($payload))
+
+    Write-WarnMsg 'System-level Codex removal requires administrator rights. Approve the UAC prompt to continue.'
+    try {
+        $process = Start-Process -FilePath $powershellPath[0].Source -Verb RunAs -Wait -PassThru -ArgumentList @(
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-EncodedCommand',
+            $encodedPayload
+        )
+    }
+    catch {
+        throw "Failed to start elevated system-level Codex uninstall: $($_.Exception.Message)"
+    }
+
+    if ($process.ExitCode -ne 0) {
+        throw "Elevated system-level Codex uninstall failed with exit code $($process.ExitCode)."
+    }
+}
+
+function Ensure-NoSystemCodex([string]$UserNpmBinDir) {
+    $systemInstalls = @(Find-SystemCodexInstalls -UserNpmBinDir $UserNpmBinDir)
+    if ($systemInstalls.Count -eq 0) {
+        Write-Info 'No system-level Codex CLI detected.'
+        return
+    }
+
+    foreach ($install in $systemInstalls) {
+        Write-WarnMsg "Detected system-level Codex CLI: $($install.PrefixDir)"
+    }
+
+    foreach ($install in $systemInstalls) {
+        [void](Invoke-NpmUninstallCodexAtPrefix $install.PrefixDir)
+        Remove-KnownSystemCodexFiles $install.PrefixDir
+    }
+
+    $remaining = @(Find-SystemCodexInstalls -UserNpmBinDir $UserNpmBinDir)
+    if (($remaining.Count -gt 0) -and -not (Test-IsAdministrator)) {
+        foreach ($install in $remaining) {
+            Invoke-ElevatedSystemCodexUninstall $install.PrefixDir
+        }
+        $remaining = @(Find-SystemCodexInstalls -UserNpmBinDir $UserNpmBinDir)
+    }
+
+    if ($remaining.Count -gt 0) {
+        $locations = @($remaining | ForEach-Object { $_.PrefixDir }) -join '; '
+        throw "System-level Codex CLI is still present: $locations. Remove it with administrator rights and rerun this installer."
+    }
+
+    Write-Ok 'System-level Codex CLI removed.'
 }
 
 function Ensure-NpmUserPrefix {
@@ -726,6 +1113,13 @@ function Install-CodexPackage {
 }
 
 function Ensure-Codex {
+    $userNpmBinDir = $null
+    if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        $userNpmBinDir = Join-Path $env:APPDATA 'npm'
+    }
+
+    Write-Info 'Checking for system-level Codex CLI before user install...'
+    Ensure-NoSystemCodex $userNpmBinDir
     Ensure-NpmUserPrefix
     $npmBinDir = Resolve-NpmGlobalBinDir
 
@@ -850,6 +1244,20 @@ apps = false
     Write-Ok "Wrote config file: $configPath"
     Write-Ok "Wrote auth file: $authPath"
     Write-Ok 'Saved CRS_OAI_KEY to USER environment variables.'
+}
+
+if (-not [string]::IsNullOrWhiteSpace($UninstallSystemCodexPrefix)) {
+    [void](Invoke-NpmUninstallCodexAtPrefix $UninstallSystemCodexPrefix)
+    Remove-KnownSystemCodexFiles $UninstallSystemCodexPrefix
+
+    $remainingSystemCodex = @(Find-SystemCodexInstalls -UserNpmBinDir $null | Where-Object {
+        $_.PrefixDir -ieq (Normalize-ComparablePath $UninstallSystemCodexPrefix)
+    })
+    if ($remainingSystemCodex.Count -gt 0) {
+        throw "System-level Codex CLI remains under: $UninstallSystemCodexPrefix"
+    }
+
+    exit 0
 }
 
 Write-Info 'Starting install for Codex CLI and dependencies...'
