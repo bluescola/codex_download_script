@@ -58,6 +58,13 @@ log_ok() { printf '[OK] %s\n' "$*"; }
 
 cmd_exists() { command -v "$1" >/dev/null 2>&1; }
 
+require_linux() {
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "[ERROR] This script is for Linux only." >&2
+    exit 1
+  fi
+}
+
 need_sudo() {
   if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     printf ''
@@ -685,6 +692,8 @@ configure_no_proxy() {
 }
 
 main() {
+  require_linux
+
   local clean_existing_config=0
   if test_preexisting_node_npm_codex; then
     clean_existing_config=1
