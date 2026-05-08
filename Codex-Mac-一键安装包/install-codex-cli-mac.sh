@@ -203,14 +203,30 @@ ensure_shell_path_block() {
 
   local block_start="# >>> codex user paths >>>"
   local block_end="# <<< codex user paths <<<"
-  local block="${block_start}\n${path_line}\n${block_end}"
 
   for file in "$HOME/.zshrc" "$HOME/.bashrc"; do
     if [[ ! -f "$file" ]]; then
       touch "$file"
     fi
-    if ! grep -F "$block_start" "$file" >/dev/null 2>&1; then
-      printf '\n%s\n' "$block" >> "$file"
+
+    if grep -F "$block_start" "$file" >/dev/null 2>&1; then
+      local tmp
+      tmp="$(mktemp)"
+      awk -v start="$block_start" -v end="$block_end" -v line="$path_line" '
+        index($0, start) {
+          print start
+          print line
+          print end
+          inblock=1
+          if (index($0, end)) inblock=0
+          next
+        }
+        index($0, end) { inblock=0; next }
+        !inblock { print }
+      ' "$file" > "$tmp"
+      mv "$tmp" "$file"
+    else
+      printf '\n%s\n%s\n%s\n' "$block_start" "$path_line" "$block_end" >> "$file"
     fi
   done
 }
