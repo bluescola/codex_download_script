@@ -47,7 +47,7 @@ function Uninstall-NodeUser {
     }
 
     Write-Info "Removing user Node.js install: $UserNodeRoot"
-    Remove-Item -Recurse -Force $UserNodeRoot
+    Remove-Item -LiteralPath $UserNodeRoot -Recurse -Force
     return $true
 }
 

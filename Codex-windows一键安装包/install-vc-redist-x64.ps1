@@ -67,6 +67,25 @@ function Resolve-InstallerAction {
     return '/install'
 }
 
+function Assert-MicrosoftSignature {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $signature = Get-AuthenticodeSignature -FilePath $Path
+    if ($signature.Status -ne 'Valid') {
+        throw "Authenticode signature is not valid for $Path. Status: $($signature.Status)"
+    }
+
+    $subject = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '' }
+    if ($subject -notmatch 'Microsoft') {
+        throw "Downloaded installer is not signed by Microsoft. Signer subject: $subject"
+    }
+
+    Write-Ok "Authenticode signature verified: $subject"
+}
+
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $downloadUrl = 'https://aka.ms/vc14/vc_redist.x64.exe'
@@ -91,12 +110,13 @@ else {
 }
 
 Write-Info 'Downloading Microsoft Visual C++ Redistributable 2015-2022 (x64)...'
-Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath
+Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
 
 if (-not (Test-Path $downloadPath)) {
     throw "Download failed: $downloadPath"
 }
 
+Assert-MicrosoftSignature -Path $downloadPath
 Write-Ok "Downloaded installer: $downloadPath"
 
 if ($DownloadOnly) {

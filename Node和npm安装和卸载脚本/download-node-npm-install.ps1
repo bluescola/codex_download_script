@@ -105,35 +105,113 @@ function Get-NodeLtsZipInfo {
     return $lts
 }
 
+function Get-NodeExpectedSha256 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Version,
+        [Parameter(Mandatory = $true)]
+        [string]$FileName
+    )
+
+    $shaUrl = "https://nodejs.org/dist/$Version/SHASUMS256.txt"
+    Write-Info "Downloading checksum manifest: $shaUrl"
+    $manifest = Invoke-WebRequest -Uri $shaUrl -UseBasicParsing
+    foreach ($line in ($manifest.Content -split "`r?`n")) {
+        if ($line -match '^([0-9a-fA-F]{64})\s+(.+)$' -and $matches[2] -eq $FileName) {
+            return $matches[1].ToLowerInvariant()
+        }
+    }
+
+    throw "Could not find checksum for $FileName in $shaUrl"
+}
+
+function Assert-FileSha256 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedHash
+    )
+
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $ExpectedHash.ToLowerInvariant()) {
+        throw "SHA256 verification failed for $Path. Expected $ExpectedHash, got $actual"
+    }
+
+    Write-Ok "SHA256 verified: $actual"
+}
+
+function Install-ExtractedNodeAtomically {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExtractRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$TargetRoot
+    )
+
+    $parent = Split-Path -Parent $TargetRoot
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+
+    $backupRoot = $null
+    if (Test-Path -LiteralPath $TargetRoot) {
+        $backupSuffix = "{0}.{1}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+        $backupRoot = "$TargetRoot.bak.$backupSuffix"
+        Write-Info "Moving existing Node.js install to backup: $backupRoot"
+        Move-Item -LiteralPath $TargetRoot -Destination $backupRoot -Force
+    }
+
+    try {
+        Move-Item -LiteralPath $ExtractRoot -Destination $TargetRoot -Force
+        if (-not (Test-Path -LiteralPath (Join-Path $TargetRoot 'node.exe'))) {
+            throw "node.exe not found in: $TargetRoot"
+        }
+
+        if ($backupRoot -and (Test-Path -LiteralPath $backupRoot)) {
+            Remove-Item -LiteralPath $backupRoot -Recurse -Force
+        }
+    }
+    catch {
+        if ((-not (Test-Path -LiteralPath $TargetRoot)) -and $backupRoot -and (Test-Path -LiteralPath $backupRoot)) {
+            Move-Item -LiteralPath $backupRoot -Destination $TargetRoot -Force
+        }
+        throw
+    }
+}
+
 function Install-NodeUserZip {
     Write-Info 'Installing Node.js LTS to user directory (no admin)...'
 
     $lts = Get-NodeLtsZipInfo
     $version = $lts.version
-    $zipUrl = "https://nodejs.org/dist/$version/node-$version-win-x64.zip"
-    $zipPath = Join-Path $env:TEMP "node-$version-win-x64.zip"
-    $extractRoot = Join-Path $env:TEMP "node-$version-win-x64"
+    $zipName = "node-$version-win-x64.zip"
+    $zipUrl = "https://nodejs.org/dist/$version/$zipName"
+    $tempRoot = Join-Path $env:TEMP ("codex-node-install-{0}" -f ([guid]::NewGuid().ToString('N')))
+    $zipPath = Join-Path $tempRoot $zipName
+    $extractRoot = Join-Path $tempRoot "node-$version-win-x64"
 
     Write-Info "Version: $version"
     Write-Info "URL: $zipUrl"
 
-    if (Test-Path $extractRoot) {
-        Remove-Item -Recurse -Force $extractRoot
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+    try {
+        Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+        $expectedHash = Get-NodeExpectedSha256 -Version $version -FileName $zipName
+        Assert-FileSha256 -Path $zipPath -ExpectedHash $expectedHash
+
+        Expand-Archive -Path $zipPath -DestinationPath $tempRoot -Force
+
+        if (-not (Test-Path -LiteralPath $extractRoot)) {
+            throw "Extracted Node.js folder not found: $extractRoot"
+        }
+
+        Install-ExtractedNodeAtomically -ExtractRoot $extractRoot -TargetRoot $UserNodeRoot
     }
-
-    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
-    Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
-
-    if (-not (Test-Path $extractRoot)) {
-        throw "Extracted Node.js folder not found: $extractRoot"
+    finally {
+        if (Test-Path -LiteralPath $tempRoot) {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
-
-    if (Test-Path $UserNodeRoot) {
-        Remove-Item -Recurse -Force $UserNodeRoot
-    }
-
-    New-Item -ItemType Directory -Path (Split-Path -Parent $UserNodeRoot) -Force | Out-Null
-    Move-Item -Path $extractRoot -Destination $UserNodeRoot
 
     if (-not (Test-Path (Join-Path $UserNodeRoot 'node.exe'))) {
         throw "node.exe not found in: $UserNodeRoot"
@@ -154,8 +232,7 @@ function Ensure-Node {
     }
 
     if ($ForceReinstall -and (Test-Path $UserNodeRoot)) {
-        Write-Info "Removing previous user Node.js install at $UserNodeRoot"
-        Remove-Item -Recurse -Force $UserNodeRoot
+        Write-Info "Force reinstall requested; existing user Node.js install will be replaced atomically: $UserNodeRoot"
     }
 
     $ok = Install-NodeUserZip
