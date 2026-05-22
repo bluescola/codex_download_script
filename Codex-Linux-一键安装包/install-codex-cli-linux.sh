@@ -6,8 +6,37 @@ FORCE_CODEX_REINSTALL=0
 REMOVE_SYSTEM_CODEX=0
 SKIP_CRS_CONFIG=0
 SKIP_NO_PROXY=0
-NODE_ROOT="${HOME}/.local/node"
-NPM_PREFIX="${HOME}/.npm-global"
+
+contains_non_ascii() {
+  local value="${1:-}"
+  [[ -n "$value" ]] || return 1
+  LC_ALL=C printf '%s' "$value" | grep -q '[^ -~]'
+}
+
+detect_ascii_safe_paths() {
+  contains_non_ascii "${HOME:-}" || contains_non_ascii "${TMPDIR:-}"
+}
+
+DEFAULT_ASCII_ROOT="/var/tmp/codex-$(id -u 2>/dev/null || printf 'user')"
+USE_ASCII_SAFE_PATHS=0
+if detect_ascii_safe_paths; then
+  USE_ASCII_SAFE_PATHS=1
+fi
+
+if [[ "$USE_ASCII_SAFE_PATHS" -eq 1 ]]; then
+  CODEX_UNIX_ROOT="${CODEX_UNIX_ASCII_ROOT:-$DEFAULT_ASCII_ROOT}"
+  CODEX_UNIX_ROOT="${CODEX_UNIX_ROOT%/}"
+  NODE_ROOT="$CODEX_UNIX_ROOT/node"
+  NPM_PREFIX="$CODEX_UNIX_ROOT/npm"
+  NPM_CACHE="$CODEX_UNIX_ROOT/npm-cache"
+  CODEX_HOME_DIR="$CODEX_UNIX_ROOT/.codex"
+else
+  CODEX_UNIX_ROOT=""
+  NODE_ROOT="${HOME}/.local/node"
+  NPM_PREFIX="${HOME}/.npm-global"
+  NPM_CACHE="${HOME}/.npm-cache"
+  CODEX_HOME_DIR="${HOME}/.codex"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -63,6 +92,20 @@ require_linux() {
     echo "[ERROR] This script is for Linux only." >&2
     exit 1
   fi
+}
+
+initialize_ascii_safe_environment() {
+  if [[ "$USE_ASCII_SAFE_PATHS" -eq 0 ]]; then
+    return 0
+  fi
+
+  log_warn "Detected non-ASCII characters in HOME/TMPDIR. Using an ASCII-only Codex root to avoid Node/npm/Codex path issues."
+  log_info "ASCII Codex root: $CODEX_UNIX_ROOT"
+  mkdir -p "$CODEX_UNIX_ROOT" "$NODE_ROOT" "$NPM_PREFIX" "$NPM_CACHE" "$CODEX_HOME_DIR"
+  chmod 700 "$CODEX_UNIX_ROOT" 2>/dev/null || true
+  export NPM_CONFIG_PREFIX="$NPM_PREFIX"
+  export NPM_CONFIG_CACHE="$NPM_CACHE"
+  export CODEX_HOME="$CODEX_HOME_DIR"
 }
 
 need_sudo() {
@@ -312,10 +355,21 @@ ensure_user_npm_prefix() {
   npm_prefix="$(npm config get prefix 2>/dev/null || true)"
 
   mkdir -p "$user_prefix"
+  mkdir -p "$NPM_CACHE"
+  export NPM_CONFIG_PREFIX="$user_prefix"
+  export NPM_CONFIG_CACHE="$NPM_CACHE"
+  export CODEX_HOME="$CODEX_HOME_DIR"
 
   if [[ "$npm_prefix" != "$user_prefix" ]]; then
     log_info "Setting npm global prefix to user directory: $user_prefix"
     npm config set prefix "$user_prefix"
+  fi
+
+  local npm_cache
+  npm_cache="$(npm config get cache 2>/dev/null || true)"
+  if [[ "$npm_cache" != "$NPM_CACHE" ]]; then
+    log_info "Setting npm cache to user directory: $NPM_CACHE"
+    npm config set cache "$NPM_CACHE"
   fi
 
   local npm_bin="${user_prefix%/}/bin"
@@ -328,7 +382,7 @@ ensure_user_npm_prefix() {
 
   local block_start="# >>> codex user paths >>>"
   local block_end="# <<< codex user paths <<<"
-  local line="export PATH=\"$npm_bin"
+  local line="export NPM_CONFIG_PREFIX=\"$user_prefix\"; export NPM_CONFIG_CACHE=\"$NPM_CACHE\"; export CODEX_HOME=\"$CODEX_HOME_DIR\"; export PATH=\"$npm_bin"
   if [[ -n "$node_bin" ]]; then
     line="$line:$node_bin"
   fi
@@ -534,12 +588,12 @@ ensure_no_system_codex() {
 
 ensure_codex() {
   local npm_prefix npm_bin
-  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  npm_prefix="$NPM_PREFIX"
   npm_bin="${npm_prefix%/}/bin"
 
   if [[ "$FORCE_CODEX_REINSTALL" -eq 1 ]]; then
     log_info "Force reinstall enabled: removing existing Codex CLI in user prefix..."
-    npm uninstall -g @openai/codex >/dev/null 2>&1 || true
+    npm uninstall -g --prefix "$npm_prefix" @openai/codex >/dev/null 2>&1 || true
   else
     if [[ -x "$npm_bin/codex" ]]; then
       if "$npm_bin/codex" --version >/dev/null 2>&1; then
@@ -551,14 +605,13 @@ ensure_codex() {
   fi
 
   log_info "Installing Codex CLI to user prefix ($npm_prefix)..."
-  if npm i -g @openai/codex >/dev/null 2>&1; then
+  if npm install -g --prefix "$npm_prefix" @openai/codex >/dev/null 2>&1; then
     :
   else
-    echo "[ERROR] npm install -g @openai/codex failed in user prefix. Check npm prefix and permissions." >&2
+    echo "[ERROR] npm install -g --prefix \"$npm_prefix\" @openai/codex failed. Check npm prefix and permissions." >&2
     exit 1
   fi
 
-  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
   npm_bin="${npm_prefix%/}/bin"
   if [[ -x "$npm_bin/codex" ]]; then
     log_ok "Codex CLI: $($npm_bin/codex --version)"
@@ -611,16 +664,90 @@ upsert_env_in_file() {
   mv "$tmp" "$file"
 }
 
+probe_crs_responses_route() {
+  local base_url="$1"
+  local probe_url status
+  probe_url="${base_url%/}/responses"
+
+  if ! cmd_exists curl; then
+    printf '000'
+    return 0
+  fi
+
+  if ! status="$(
+    curl -sS -o /dev/null -w '%{http_code}' \
+      --max-time 8 \
+      -X POST \
+      -H 'Content-Type: application/json' \
+      --data '{}' \
+      "$probe_url" 2>/dev/null
+  )"; then
+    status='000'
+  fi
+  printf '%s' "$status"
+}
+
+resolve_crs_base_url() {
+  local input="$1"
+  local trimmed status candidate candidate_status
+  trimmed="$(trim_trailing_slash "$input")"
+
+  if [[ -z "$trimmed" ]]; then
+    printf '%s' "$input"
+    return 0
+  fi
+
+  if ! cmd_exists curl; then
+    log_warn "curl not found; skipping CRS /responses route probe." >&2
+    printf '%s' "$trimmed"
+    return 0
+  fi
+
+  status="$(probe_crs_responses_route "$trimmed")"
+  if [[ "$status" != "404" && "$status" != "000" ]]; then
+    log_info "CRS Responses route probe: $status ${trimmed%/}/responses" >&2
+    printf '%s' "$trimmed"
+    return 0
+  fi
+
+  if [[ "$status" == "404" ]]; then
+    log_warn "CRS Responses route probe returned 404: ${trimmed%/}/responses" >&2
+  else
+    log_warn "Could not verify CRS Responses route: ${trimmed%/}/responses" >&2
+  fi
+
+  candidate=''
+  case "$trimmed" in
+    http://*/api|https://*/api)
+      candidate="${trimmed%/api}/openai"
+      ;;
+  esac
+
+  if [[ -n "$candidate" ]]; then
+    candidate_status="$(probe_crs_responses_route "$candidate")"
+    if [[ "$candidate_status" != "404" && "$candidate_status" != "000" ]]; then
+      log_warn "The entered CRS base_url does not expose /responses. Using detected OpenAI-compatible base_url instead: $candidate" >&2
+      log_info "CRS Responses route probe: $candidate_status ${candidate%/}/responses" >&2
+      printf '%s' "$candidate"
+      return 0
+    fi
+  fi
+
+  log_warn "Could not verify that the CRS base_url exposes the Responses API. Codex may fail if /responses is not available." >&2
+  printf '%s' "$trimmed"
+}
+
 configure_crs() {
   local clean_existing="${1:-0}"
-  local codex_dir config_path auth_path base_url crs_key
-  codex_dir="$HOME/.codex"
+  local codex_dir config_path auth_path base_url_input base_url crs_key
+  codex_dir="$CODEX_HOME_DIR"
   config_path="$codex_dir/config.toml"
   auth_path="$codex_dir/auth.json"
 
   log_info "Starting CRS configuration..."
-  base_url="$(read_required 'Enter CRS base_url (example: http://x.x.x.x:10086/openai): ')"
+  base_url_input="$(read_required 'Enter CRS base_url (must expose /responses, example: http://x.x.x.x:10086/openai): ')"
   crs_key="$(read_secret_required 'Enter CRS_OAI_KEY (hidden input): ')"
+  base_url="$(resolve_crs_base_url "$base_url_input")"
 
   mkdir -p "$codex_dir"
   if [[ "$clean_existing" -eq 1 ]]; then
@@ -666,14 +793,17 @@ CFG
 AUTH
 
   export CRS_OAI_KEY="$crs_key"
+  export CODEX_HOME="$codex_dir"
 
   # Persist in common shells.
   upsert_env_in_file "$HOME/.bashrc" "CRS_OAI_KEY" "$crs_key"
   upsert_env_in_file "$HOME/.zshrc" "CRS_OAI_KEY" "$crs_key"
+  upsert_env_in_file "$HOME/.bashrc" "CODEX_HOME" "$codex_dir"
+  upsert_env_in_file "$HOME/.zshrc" "CODEX_HOME" "$codex_dir"
 
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"
-  log_ok "Persisted CRS_OAI_KEY in ~/.bashrc and ~/.zshrc"
+  log_ok "Persisted CRS_OAI_KEY and CODEX_HOME in ~/.bashrc and ~/.zshrc"
 }
 
 configure_no_proxy() {
@@ -693,6 +823,7 @@ configure_no_proxy() {
 
 main() {
   require_linux
+  initialize_ascii_safe_environment
 
   local clean_existing_config=0
   if test_preexisting_node_npm_codex; then

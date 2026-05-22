@@ -50,40 +50,65 @@ function Test-NeedsAsciiSafePaths {
     return $false
 }
 
-$script:UseAsciiSafePaths = Test-NeedsAsciiSafePaths
-$script:CodexAsciiRoot = Resolve-AsciiSafeRoot
-$script:CodexNpmPrefix = if ($script:UseAsciiSafePaths -or [string]::IsNullOrWhiteSpace($env:APPDATA)) {
-    Join-Path $script:CodexAsciiRoot 'npm'
-} else {
-    Join-Path $env:APPDATA 'npm'
+function Initialize-CodexPathSettings {
+    $script:UseAsciiSafePaths = Test-NeedsAsciiSafePaths
+    $script:CodexAsciiRoot = Resolve-AsciiSafeRoot
+    $script:CodexNpmPrefix = if ($script:UseAsciiSafePaths -or [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        Join-Path $script:CodexAsciiRoot 'npm'
+    } else {
+        Join-Path $env:APPDATA 'npm'
+    }
+    $script:CodexNpmCache = if ($script:UseAsciiSafePaths -or [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        Join-Path $script:CodexAsciiRoot 'npm-cache'
+    } else {
+        Join-Path $env:LOCALAPPDATA 'npm-cache'
+    }
+    $script:CodexNpmUserConfig = if ($script:UseAsciiSafePaths) {
+        Join-Path $script:CodexAsciiRoot 'npmrc'
+    } else {
+        $null
+    }
+    $script:CodexTempRoot = if ($script:UseAsciiSafePaths) {
+        Join-Path $script:CodexAsciiRoot 'temp'
+    } else {
+        $env:TEMP
+    }
+    $script:CodexHome = if ($script:UseAsciiSafePaths -or [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        Join-Path $script:CodexAsciiRoot '.codex'
+    } else {
+        Join-Path $env:USERPROFILE '.codex'
+    }
+    $script:UserNodeRoot = if ($script:UseAsciiSafePaths) {
+        Join-Path $script:CodexAsciiRoot 'nodejs'
+    } elseif ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        Join-Path $env:USERPROFILE '.local\node'
+    } else {
+        Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
+    }
 }
-$script:CodexNpmCache = if ($script:UseAsciiSafePaths -or [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-    Join-Path $script:CodexAsciiRoot 'npm-cache'
-} else {
-    Join-Path $env:LOCALAPPDATA 'npm-cache'
+
+function Ensure-CodexPathSettings {
+    $requiredNames = @(
+        'UseAsciiSafePaths',
+        'CodexAsciiRoot',
+        'CodexNpmPrefix',
+        'CodexNpmCache',
+        'CodexNpmUserConfig',
+        'CodexTempRoot',
+        'CodexHome',
+        'UserNodeRoot'
+    )
+
+    foreach ($name in $requiredNames) {
+        if (-not (Get-Variable -Scope Script -Name $name -ErrorAction SilentlyContinue)) {
+            Write-WarnMsg "Codex path setting missing before use: script:$name. Reinitializing path settings."
+            Initialize-CodexPathSettings
+            return
+        }
+    }
 }
-$script:CodexNpmUserConfig = if ($script:UseAsciiSafePaths) {
-    Join-Path $script:CodexAsciiRoot 'npmrc'
-} else {
-    $null
-}
-$script:CodexTempRoot = if ($script:UseAsciiSafePaths) {
-    Join-Path $script:CodexAsciiRoot 'temp'
-} else {
-    $env:TEMP
-}
-$script:CodexHome = if ($script:UseAsciiSafePaths -or [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
-    Join-Path $script:CodexAsciiRoot '.codex'
-} else {
-    Join-Path $env:USERPROFILE '.codex'
-}
-$UserNodeRoot = if ($script:UseAsciiSafePaths) {
-    Join-Path $script:CodexAsciiRoot 'nodejs'
-} elseif ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-    Join-Path $env:USERPROFILE '.local\node'
-} else {
-    Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
-}
+
+Initialize-CodexPathSettings
 $script:NpmCommandOverride = $NpmCommandPath
 
 function Write-Info([string]$Message) {
@@ -107,6 +132,8 @@ function ConvertTo-NpmConfigPath([string]$PathValue) {
 }
 
 function Initialize-AsciiSafeEnvironment {
+    Ensure-CodexPathSettings
+
     if (-not $script:UseAsciiSafePaths) {
         return
     }
@@ -225,6 +252,8 @@ function New-CodexVersionFailureMessage([string]$CommandLabel, [object]$Result) 
 }
 
 function Refresh-Path {
+    Ensure-CodexPathSettings
+
     $extraPaths = New-Object System.Collections.Generic.List[string]
     if (-not [string]::IsNullOrWhiteSpace($UserNodeRoot)) {
         [void]$extraPaths.Add($UserNodeRoot)
@@ -338,6 +367,8 @@ function Ensure-CurrentPathContains([string]$PathEntry, [switch]$Prepend) {
 }
 
 function Resolve-NpmGlobalBinDir {
+    Ensure-CodexPathSettings
+
     try {
         $prefix = (& npm config get prefix).Trim()
         if (-not [string]::IsNullOrWhiteSpace($prefix)) {
@@ -451,6 +482,8 @@ function Test-IsSystemLevelCodexPath([string]$PathValue, [string]$UserNpmBinDir)
 }
 
 function Resolve-NpmCommandPath {
+    Ensure-CodexPathSettings
+
     if ((-not [string]::IsNullOrWhiteSpace($script:NpmCommandOverride)) -and (Test-Path -LiteralPath $script:NpmCommandOverride)) {
         return $script:NpmCommandOverride
     }
@@ -735,6 +768,8 @@ function Ensure-NoSystemCodex([string]$UserNpmBinDir) {
 }
 
 function Ensure-NpmUserPrefix {
+    Ensure-CodexPathSettings
+
     $target = $script:CodexNpmPrefix
     if ([string]::IsNullOrWhiteSpace($target)) {
         return
@@ -778,6 +813,8 @@ function Ensure-NpmUserPrefix {
 }
 
 function Resolve-NodeInstallDir {
+    Ensure-CodexPathSettings
+
     if (-not [string]::IsNullOrWhiteSpace($UserNodeRoot)) {
         if (Test-Path (Join-Path $UserNodeRoot 'node.exe')) {
             return $UserNodeRoot
@@ -822,6 +859,8 @@ function Test-PreexistingNodeAndNpm {
 }
 
 function Test-PreexistingCodex {
+    Ensure-CodexPathSettings
+
     if (Command-Exists 'codex') {
         return $true
     }
@@ -937,6 +976,116 @@ function Backup-FileIfExists([string]$PathToBackup) {
     Write-Info "Backed up existing file: $backupPath"
 }
 
+function Write-CodexConfigFiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CodexDir,
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigToml,
+        [Parameter(Mandatory = $true)]
+        [string]$AuthJson,
+        [Parameter(Mandatory = $true)]
+        [System.Text.Encoding]$Encoding,
+        [switch]$CleanExistingConfig
+    )
+
+    New-Item -ItemType Directory -Path $CodexDir -Force | Out-Null
+    $configPath = Join-Path $CodexDir 'config.toml'
+    $authPath = Join-Path $CodexDir 'auth.json'
+
+    if ($CleanExistingConfig) {
+        Clear-ExistingCrsConfig -CodexDir $CodexDir
+    }
+    else {
+        Backup-FileIfExists $configPath
+        Backup-FileIfExists $authPath
+    }
+
+    [System.IO.File]::WriteAllText($configPath, $ConfigToml, $Encoding)
+    [System.IO.File]::WriteAllText($authPath, $AuthJson, $Encoding)
+
+    Write-Ok "Wrote config file: $configPath"
+    Write-Ok "Wrote auth file: $authPath"
+}
+
+function Invoke-CrsResponsesRouteProbe([string]$BaseUrl) {
+    $trimmed = $BaseUrl.Trim().TrimEnd('/')
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        return $null
+    }
+
+    try {
+        $probeUrl = "$trimmed/responses"
+        $response = Invoke-WebRequest `
+            -Uri $probeUrl `
+            -Method Post `
+            -Body '{}' `
+            -ContentType 'application/json' `
+            -TimeoutSec 8 `
+            -UseBasicParsing `
+            -ErrorAction Stop
+
+        return [pscustomobject]@{
+            BaseUrl = $trimmed
+            Url = $probeUrl
+            StatusCode = [int]$response.StatusCode
+            ErrorMessage = $null
+        }
+    }
+    catch {
+        $statusCode = $null
+        $message = $_.Exception.Message
+        if ($_.Exception.Response) {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+        }
+
+        return [pscustomobject]@{
+            BaseUrl = $trimmed
+            Url = "$trimmed/responses"
+            StatusCode = $statusCode
+            ErrorMessage = $message
+        }
+    }
+}
+
+function Resolve-CrsBaseUrl([string]$BaseUrl) {
+    $trimmed = $BaseUrl.Trim().TrimEnd('/')
+    $probe = Invoke-CrsResponsesRouteProbe $trimmed
+    if ($probe -and ($probe.StatusCode -ne 404)) {
+        Write-Info "CRS Responses route probe: $($probe.StatusCode) $($probe.Url)"
+        return $trimmed
+    }
+
+    if ($probe) {
+        Write-WarnMsg "CRS Responses route probe returned 404: $($probe.Url)"
+    }
+
+    $candidate = $null
+    try {
+        $uri = [Uri]$trimmed
+        if ($uri.AbsolutePath.TrimEnd('/') -ieq '/api') {
+            $builder = [UriBuilder]$uri
+            $builder.Path = 'openai'
+            $builder.Query = ''
+            $candidate = $builder.Uri.AbsoluteUri.TrimEnd('/')
+        }
+    }
+    catch {
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+        $candidateProbe = Invoke-CrsResponsesRouteProbe $candidate
+        if ($candidateProbe -and ($candidateProbe.StatusCode -ne 404)) {
+            Write-WarnMsg "The entered CRS base_url does not expose /responses. Using detected OpenAI-compatible base_url instead: $candidate"
+            Write-Info "CRS Responses route probe: $($candidateProbe.StatusCode) $($candidateProbe.Url)"
+            return $candidate
+        }
+    }
+
+    Write-WarnMsg 'Could not verify that the CRS base_url exposes the Responses API. Codex may fail if /responses is not available.'
+    return $trimmed
+}
+
 function Read-RequiredInput([string]$Prompt) {
     while ($true) {
         $value = (Read-Host $Prompt).Trim()
@@ -966,6 +1115,8 @@ function Read-SecretInput([string]$Prompt) {
 }
 
 function Node-And-Npm-Ready {
+    Ensure-CodexPathSettings
+
     if ([string]::IsNullOrWhiteSpace($UserNodeRoot)) {
         return $false
     }
@@ -987,6 +1138,8 @@ function Get-NodeLtsZipInfo {
 }
 
 function Install-NodeUserZip {
+    Ensure-CodexPathSettings
+
     Write-Info 'Installing Node.js LTS to user directory (no admin)...'
 
     $lts = Get-NodeLtsZipInfo
@@ -1027,6 +1180,8 @@ function Install-NodeUserZip {
 }
 
 function Ensure-Node {
+    Ensure-CodexPathSettings
+
     # Prefer any existing Node/npm available on PATH (system install or other managed installs).
     # Only fall back to downloading a user-local Node zip if Node/npm are not present.
     Refresh-Path
@@ -1299,7 +1454,10 @@ function Ensure-CodexCommandWorks([string]$NpmBinDir) {
 
 function Install-CodexPackage {
     Write-Info 'Installing Codex CLI...'
-    & npm install -g --prefix $script:CodexNpmPrefix '@openai/codex'
+    Ensure-CodexPathSettings
+
+    $npmPrefixForInstall = $script:CodexNpmPrefix
+    & npm install -g --prefix $npmPrefixForInstall '@openai/codex'
     $installExit = $LASTEXITCODE
     if ($installExit -eq 0) {
         return
@@ -1322,7 +1480,8 @@ function Install-CodexPackage {
     Get-Process -Name codex -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 
-    & npm install -g --prefix $script:CodexNpmPrefix '@openai/codex'
+    $npmPrefixForInstall = $script:CodexNpmPrefix
+    & npm install -g --prefix $npmPrefixForInstall '@openai/codex'
     $retryExit = $LASTEXITCODE
     if ($retryExit -ne 0) {
         throw "npm install -g @openai/codex failed (exit $retryExit). Close terminals/tools using codex.exe and retry."
@@ -1330,6 +1489,8 @@ function Install-CodexPackage {
 }
 
 function Ensure-Codex {
+    Ensure-CodexPathSettings
+
     $userNpmBinDir = $script:CodexNpmPrefix
 
     Write-Info 'Checking for system-level Codex CLI before user install...'
@@ -1390,28 +1551,20 @@ function Configure-CrsFiles {
         [switch]$CleanExistingConfig
     )
 
+    Ensure-CodexPathSettings
+
     $codexDir = $script:CodexHome
-    $configPath = Join-Path $codexDir 'config.toml'
-    $authPath = Join-Path $codexDir 'auth.json'
 
     Write-Info 'Starting CRS configuration...'
     Write-Info 'Please provide values for base_url and CRS_OAI_KEY.'
 
-    $baseUrl = Read-RequiredInput 'Enter CRS base_url (example: http://x.x.x.x:10086/openai)'
+    $baseUrlInput = Read-RequiredInput 'Enter CRS base_url (must expose /responses, example: http://x.x.x.x:10086/openai)'
     $crsKey = Read-SecretInput 'Enter CRS_OAI_KEY (input hidden)'
+    $baseUrl = Resolve-CrsBaseUrl $baseUrlInput
 
-    New-Item -ItemType Directory -Path $codexDir -Force | Out-Null
     if ($script:UseAsciiSafePaths) {
         $env:CODEX_HOME = $codexDir
         [Environment]::SetEnvironmentVariable('CODEX_HOME', $codexDir, 'User')
-    }
-    if ($CleanExistingConfig) {
-        Write-Info 'Detected existing node/npm/codex; cleaning old CRS configuration before regenerating...'
-        Clear-ExistingCrsConfig -CodexDir $codexDir
-    }
-    else {
-        Backup-FileIfExists $configPath
-        Backup-FileIfExists $authPath
     }
 
     $configToml = @"
@@ -1451,14 +1604,20 @@ apps = false
 "@
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($configPath, $configToml, $utf8NoBom)
-    [System.IO.File]::WriteAllText($authPath, $authJson, $utf8NoBom)
+    if ($CleanExistingConfig) {
+        Write-Info 'Detected existing node/npm/codex; cleaning old CRS configuration before regenerating...'
+    }
+
+    Write-CodexConfigFiles `
+        -CodexDir $codexDir `
+        -ConfigToml $configToml `
+        -AuthJson $authJson `
+        -Encoding $utf8NoBom `
+        -CleanExistingConfig:$CleanExistingConfig
 
     [Environment]::SetEnvironmentVariable('CRS_OAI_KEY', $crsKey, 'User')
     $env:CRS_OAI_KEY = $crsKey
 
-    Write-Ok "Wrote config file: $configPath"
-    Write-Ok "Wrote auth file: $authPath"
     Write-Ok 'Saved CRS_OAI_KEY to USER environment variables.'
 }
 
