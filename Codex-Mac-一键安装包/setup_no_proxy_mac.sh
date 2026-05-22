@@ -13,9 +13,29 @@ log() {
 
 required=("3.27.43.117" "3.27.43.117:10086" "localhost" "127.0.0.1")
 
-current="${NO_PROXY:-${no_proxy:-}}"
+append_crs_base_url_items() {
+  local config_path="${CODEX_HOME:-$HOME/.codex}/config.toml"
+  local base_url hostport host
+  [[ -f "$config_path" ]] || return 0
+
+  base_url="$(sed -n 's/^[[:space:]]*base_url[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$config_path" | head -n 1)"
+  [[ -n "$base_url" ]] || return 0
+
+  hostport="${base_url#*://}"
+  hostport="${hostport%%/*}"
+  host="${hostport%%:*}"
+  [[ -n "$host" && "$host" != "$base_url" ]] || return 0
+
+  required+=("$host")
+  if [[ "$hostport" == *:* && "$hostport" != "$host" ]]; then
+    required+=("$hostport")
+  fi
+}
+append_crs_base_url_items
+
 log "Current NO_PROXY/no_proxy:"
-echo "  ${current}"
+echo "  NO_PROXY=${NO_PROXY:-}"
+echo "  no_proxy=${no_proxy:-}"
 
 trim() {
   echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
@@ -31,13 +51,15 @@ contains() {
 }
 
 items=()
-IFS=',' read -r -a parts <<< "${current}"
-for p in "${parts[@]}"; do
-  p="$(trim "$p")"
-  [[ -z "$p" ]] && continue
-  if ! contains "$p" "${items[@]}"; then
-    items+=("$p")
-  fi
+for current in "${NO_PROXY:-}" "${no_proxy:-}"; do
+  IFS=',' read -r -a parts <<< "${current}"
+  for p in "${parts[@]}"; do
+    p="$(trim "$p")"
+    [[ -z "$p" ]] && continue
+    if ! contains "$p" "${items[@]}"; then
+      items+=("$p")
+    fi
+  done
 done
 
 for v in "${required[@]}"; do

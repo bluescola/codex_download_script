@@ -18,6 +18,34 @@ $Required = @(
   "127.0.0.1"
 )
 
+function Add-CrsBaseUrlItems {
+  $configCandidates = New-Object System.Collections.Generic.List[string]
+  if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+    [void]$configCandidates.Add((Join-Path $env:CODEX_HOME 'config.toml'))
+  }
+  if (-not [string]::IsNullOrWhiteSpace($HOME)) {
+    [void]$configCandidates.Add((Join-Path $HOME '.codex\config.toml'))
+  }
+
+  foreach ($configPath in $configCandidates) {
+    if (-not (Test-Path -LiteralPath $configPath)) { continue }
+    $content = Get-Content -LiteralPath $configPath -Raw -ErrorAction SilentlyContinue
+    if ($content -notmatch '(?m)^\s*base_url\s*=\s*"([^"]+)"') { continue }
+
+    try {
+      $uri = [Uri]$matches[1]
+      if ([string]::IsNullOrWhiteSpace($uri.Host)) { continue }
+      $script:Required += $uri.Host
+      if (-not $uri.IsDefaultPort) {
+        $script:Required += ("{0}:{1}" -f $uri.Host, $uri.Port)
+      }
+    } catch {
+    }
+    break
+  }
+}
+Add-CrsBaseUrlItems
+
 function Normalize-List([string]$Value) {
   if ([string]::IsNullOrWhiteSpace($Value)) { return @() }
   return $Value.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
@@ -29,11 +57,15 @@ function Add-Unique([System.Collections.Generic.List[string]]$List, [string]$Ite
 
 Write-Log "Reading current NO_PROXY..."
 $CurrentUser = [Environment]::GetEnvironmentVariable("NO_PROXY", "User")
-$Current = if ([string]::IsNullOrWhiteSpace($CurrentUser)) { $env:NO_PROXY } else { $CurrentUser }
-$CurrentSafe = if ($null -eq $Current) { "" } else { $Current }
+$CurrentProcess = $env:NO_PROXY
+$CurrentSafe = @(
+  $(if ($null -eq $CurrentUser) { "" } else { $CurrentUser }),
+  $(if ($null -eq $CurrentProcess) { "" } else { $CurrentProcess })
+) -join ","
 
 Write-Log "Current NO_PROXY (User/Process):"
-Write-Host ("  " + $CurrentSafe)
+Write-Host ("  User:    " + $(if ($null -eq $CurrentUser) { "" } else { $CurrentUser }))
+Write-Host ("  Process: " + $(if ($null -eq $CurrentProcess) { "" } else { $CurrentProcess }))
 
 $Items = New-Object System.Collections.Generic.List[string]
 foreach ($v in (Normalize-List $CurrentSafe)) { Add-Unique $Items $v }
