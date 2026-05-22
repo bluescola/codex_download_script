@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 
 set "SCRIPT_DIR=%~dp0"
-set "PS1_SCRIPT=%SCRIPT_DIR%check-codex-env.ps1"
+set "PS1_SCRIPT=%SCRIPT_DIR%check-and-repair-codex-env.ps1"
 
 if not exist "%PS1_SCRIPT%" (
   echo [FAIL] Script not found: "%PS1_SCRIPT%"
@@ -20,7 +20,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo === Codex Env Check ===
+echo === Codex Env Check and Repair ===
 echo [INFO] Running "%PS1_SCRIPT%"
 echo.
 
@@ -32,7 +32,7 @@ if "%EXIT_CODE%"=="0" goto :ok
 goto :fail
 
 :ok
-echo [ OK ] Check completed.
+echo [ OK ] Check/repair completed.
 goto :done
 
 :fail
