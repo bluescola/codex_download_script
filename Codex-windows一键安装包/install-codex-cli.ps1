@@ -8,7 +8,78 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$UserNodeRoot = if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+
+function Test-ContainsNonAscii([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    return [regex]::IsMatch($Value, '[^\x00-\x7F]')
+}
+
+function Resolve-AsciiSafeRoot {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in @(
+        $env:CODEX_WINDOWS_ASCII_ROOT,
+        $(if (-not [string]::IsNullOrWhiteSpace($env:PUBLIC)) { Join-Path $env:PUBLIC 'Codex' }),
+        $(if (-not [string]::IsNullOrWhiteSpace($env:ProgramData)) { Join-Path $env:ProgramData 'Codex' }),
+        'C:\Codex'
+    )) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            [void]$candidates.Add($candidate)
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        $trimmed = $candidate.Trim().TrimEnd('\')
+        if (-not (Test-ContainsNonAscii $trimmed)) {
+            return $trimmed
+        }
+    }
+
+    return 'C:\Codex'
+}
+
+function Test-NeedsAsciiSafePaths {
+    foreach ($value in @($env:USERPROFILE, $env:APPDATA, $env:LOCALAPPDATA, $env:TEMP, $env:TMP)) {
+        if (Test-ContainsNonAscii $value) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+$script:UseAsciiSafePaths = Test-NeedsAsciiSafePaths
+$script:CodexAsciiRoot = Resolve-AsciiSafeRoot
+$script:CodexNpmPrefix = if ($script:UseAsciiSafePaths -or [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+    Join-Path $script:CodexAsciiRoot 'npm'
+} else {
+    Join-Path $env:APPDATA 'npm'
+}
+$script:CodexNpmCache = if ($script:UseAsciiSafePaths -or [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    Join-Path $script:CodexAsciiRoot 'npm-cache'
+} else {
+    Join-Path $env:LOCALAPPDATA 'npm-cache'
+}
+$script:CodexNpmUserConfig = if ($script:UseAsciiSafePaths) {
+    Join-Path $script:CodexAsciiRoot 'npmrc'
+} else {
+    $null
+}
+$script:CodexTempRoot = if ($script:UseAsciiSafePaths) {
+    Join-Path $script:CodexAsciiRoot 'temp'
+} else {
+    $env:TEMP
+}
+$script:CodexHome = if ($script:UseAsciiSafePaths -or [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+    Join-Path $script:CodexAsciiRoot '.codex'
+} else {
+    Join-Path $env:USERPROFILE '.codex'
+}
+$UserNodeRoot = if ($script:UseAsciiSafePaths) {
+    Join-Path $script:CodexAsciiRoot 'nodejs'
+} elseif ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
     Join-Path $env:USERPROFILE '.local\node'
 } else {
     Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
@@ -27,6 +98,55 @@ function Write-Ok([string]$Message) {
     Write-Host "[OK] $Message" -ForegroundColor Green
 }
 
+function ConvertTo-NpmConfigPath([string]$PathValue) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return ''
+    }
+
+    return $PathValue.Replace('\', '/')
+}
+
+function Initialize-AsciiSafeEnvironment {
+    if (-not $script:UseAsciiSafePaths) {
+        return
+    }
+
+    Write-WarnMsg 'Detected non-ASCII characters in Windows user paths. Using an ASCII-only Codex root to avoid Node/npm/Codex native path issues.'
+    Write-Info "ASCII Codex root: $script:CodexAsciiRoot"
+
+    foreach ($dir in @(
+        $script:CodexAsciiRoot,
+        $script:CodexNpmPrefix,
+        $script:CodexNpmCache,
+        $script:CodexTempRoot,
+        $script:CodexHome,
+        (Split-Path -Parent $UserNodeRoot)
+    )) {
+        if (-not [string]::IsNullOrWhiteSpace($dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+    }
+
+    $env:NPM_CONFIG_PREFIX = $script:CodexNpmPrefix
+    $env:NPM_CONFIG_CACHE = $script:CodexNpmCache
+    $env:CODEX_HOME = $script:CodexHome
+    [Environment]::SetEnvironmentVariable('NPM_CONFIG_PREFIX', $script:CodexNpmPrefix, 'User')
+    [Environment]::SetEnvironmentVariable('NPM_CONFIG_CACHE', $script:CodexNpmCache, 'User')
+    [Environment]::SetEnvironmentVariable('CODEX_HOME', $script:CodexHome, 'User')
+
+    if (-not [string]::IsNullOrWhiteSpace($script:CodexNpmUserConfig)) {
+        $env:NPM_CONFIG_USERCONFIG = $script:CodexNpmUserConfig
+        [Environment]::SetEnvironmentVariable('NPM_CONFIG_USERCONFIG', $script:CodexNpmUserConfig, 'User')
+
+        $npmrc = @(
+            "prefix=$(ConvertTo-NpmConfigPath $script:CodexNpmPrefix)",
+            "cache=$(ConvertTo-NpmConfigPath $script:CodexNpmCache)"
+        ) -join [Environment]::NewLine
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($script:CodexNpmUserConfig, $npmrc + [Environment]::NewLine, $utf8NoBom)
+    }
+}
+
 function Command-Exists([string]$Name) {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
@@ -43,7 +163,7 @@ function Get-CodexRuntimeHint([int]$ExitCode) {
             if (Test-Path $helperScript) {
                 $hint += ' You can run install-vc-redist-x64.cmd from this package.'
             }
-            $hint += ' If the runtime is already installed, inspect antivirus/AppLocker and the native executable under %APPDATA%\npm\node_modules\@openai\codex.'
+            $hint += ' If the runtime is already installed, inspect antivirus/AppLocker and the native executable under the configured npm prefix (for example %APPDATA%\npm or C:\Users\Public\Codex\npm).'
             return $hint
         }
         default {
@@ -116,6 +236,9 @@ function Refresh-Path {
     if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
         [void]$extraPaths.Add("$env:ProgramFiles\nodejs")
     }
+    if (-not [string]::IsNullOrWhiteSpace($script:CodexNpmPrefix)) {
+        [void]$extraPaths.Add($script:CodexNpmPrefix)
+    }
     if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
         [void]$extraPaths.Add("$env:APPDATA\npm")
     }
@@ -128,7 +251,7 @@ function Refresh-Path {
     }
 }
 
-function Ensure-UserPathContains([string]$PathEntry) {
+function Ensure-UserPathContains([string]$PathEntry, [switch]$Prepend) {
     if ([string]::IsNullOrWhiteSpace($PathEntry)) {
         return
     }
@@ -145,21 +268,72 @@ function Ensure-UserPathContains([string]$PathEntry) {
     }
 
     $exists = $false
+    $remainingParts = New-Object System.Collections.Generic.List[string]
     foreach ($p in $parts) {
         if ($p.Trim().TrimEnd('\') -ieq $normalizedEntry) {
             $exists = $true
-            break
+            continue
         }
+
+        [void]$remainingParts.Add($p)
     }
 
-    if (-not $exists) {
-        $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) {
-            $normalizedEntry
-        } else {
-            "$userPath;$normalizedEntry"
+    if ((-not $exists) -or $Prepend) {
+        $newParts = New-Object System.Collections.Generic.List[string]
+        if ($Prepend) {
+            [void]$newParts.Add($normalizedEntry)
+            foreach ($p in $remainingParts) { [void]$newParts.Add($p) }
         }
+        else {
+            foreach ($p in $remainingParts) { [void]$newParts.Add($p) }
+            [void]$newParts.Add($normalizedEntry)
+        }
+
+        $newUserPath = ($newParts.ToArray() -join ';')
         [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
-        Write-Info "Added to USER PATH: $normalizedEntry"
+        if ($exists -and $Prepend) {
+            Write-Info "Moved to front of USER PATH: $normalizedEntry"
+        }
+        else {
+            Write-Info "Added to USER PATH: $normalizedEntry"
+        }
+    }
+}
+
+function Ensure-CurrentPathContains([string]$PathEntry, [switch]$Prepend) {
+    if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+        return
+    }
+
+    $normalizedEntry = $PathEntry.Trim().TrimEnd('\')
+    $parts = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:Path)) {
+        $parts = $env:Path -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    }
+
+    $exists = $false
+    $remainingParts = New-Object System.Collections.Generic.List[string]
+    foreach ($p in $parts) {
+        if ($p.Trim().TrimEnd('\') -ieq $normalizedEntry) {
+            $exists = $true
+            continue
+        }
+
+        [void]$remainingParts.Add($p)
+    }
+
+    if ((-not $exists) -or $Prepend) {
+        $newParts = New-Object System.Collections.Generic.List[string]
+        if ($Prepend) {
+            [void]$newParts.Add($normalizedEntry)
+            foreach ($p in $remainingParts) { [void]$newParts.Add($p) }
+        }
+        else {
+            foreach ($p in $remainingParts) { [void]$newParts.Add($p) }
+            [void]$newParts.Add($normalizedEntry)
+        }
+
+        $env:Path = ($newParts.ToArray() -join ';')
     }
 }
 
@@ -173,7 +347,7 @@ function Resolve-NpmGlobalBinDir {
     catch {
     }
 
-    return (Join-Path $env:APPDATA 'npm')
+    return $script:CodexNpmPrefix
 }
 
 function Normalize-ComparablePath([string]$PathValue) {
@@ -561,11 +735,22 @@ function Ensure-NoSystemCodex([string]$UserNpmBinDir) {
 }
 
 function Ensure-NpmUserPrefix {
-    if ([string]::IsNullOrWhiteSpace($env:APPDATA)) {
+    $target = $script:CodexNpmPrefix
+    if ([string]::IsNullOrWhiteSpace($target)) {
         return
     }
 
-    $target = Join-Path $env:APPDATA 'npm'
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
+    New-Item -ItemType Directory -Path $script:CodexNpmCache -Force | Out-Null
+
+    if ($script:UseAsciiSafePaths) {
+        $env:NPM_CONFIG_PREFIX = $target
+        $env:NPM_CONFIG_CACHE = $script:CodexNpmCache
+        if (-not [string]::IsNullOrWhiteSpace($script:CodexNpmUserConfig)) {
+            $env:NPM_CONFIG_USERCONFIG = $script:CodexNpmUserConfig
+        }
+    }
+
     $current = $null
     try {
         $current = (& npm config get prefix).Trim()
@@ -576,6 +761,19 @@ function Ensure-NpmUserPrefix {
     if ([string]::IsNullOrWhiteSpace($current) -or ($current -ne $target)) {
         & npm config set prefix $target | Out-Null
         Write-Info "Set npm prefix to user directory: $target"
+    }
+
+    if ($script:UseAsciiSafePaths) {
+        try {
+            $currentCache = (& npm config get cache).Trim()
+            if ([string]::IsNullOrWhiteSpace($currentCache) -or ($currentCache -ne $script:CodexNpmCache)) {
+                & npm config set cache $script:CodexNpmCache | Out-Null
+                Write-Info "Set npm cache to ASCII directory: $script:CodexNpmCache"
+            }
+        }
+        catch {
+            Write-WarnMsg "Failed to verify npm cache config: $($_.Exception.Message)"
+        }
     }
 }
 
@@ -629,6 +827,15 @@ function Test-PreexistingCodex {
     }
     if (Command-Exists 'codex.cmd') {
         return $true
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($script:CodexNpmPrefix)) {
+        if (Test-Path (Join-Path $script:CodexNpmPrefix 'codex.cmd')) {
+            return $true
+        }
+        if (Test-Path (Join-Path $script:CodexNpmPrefix 'codex.ps1')) {
+            return $true
+        }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
@@ -785,35 +992,35 @@ function Install-NodeUserZip {
     $lts = Get-NodeLtsZipInfo
     $version = $lts.version
     $zipUrl = "https://nodejs.org/dist/$version/node-$version-win-x64.zip"
-    $zipPath = Join-Path $env:TEMP "node-$version-win-x64.zip"
-    $extractRoot = Join-Path $env:TEMP "node-$version-win-x64"
+    $tempRoot = if ([string]::IsNullOrWhiteSpace($script:CodexTempRoot)) { $env:TEMP } else { $script:CodexTempRoot }
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    $zipPath = Join-Path $tempRoot "node-$version-win-x64.zip"
+    $extractRoot = Join-Path $tempRoot "node-$version-win-x64"
 
-    if (Test-Path $extractRoot) {
-        Remove-Item -Recurse -Force $extractRoot
+    if (Test-Path -LiteralPath $extractRoot) {
+        Remove-Item -LiteralPath $extractRoot -Recurse -Force
     }
 
     Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
-    Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
+    Expand-Archive -Path $zipPath -DestinationPath $tempRoot -Force
 
-    if (-not (Test-Path $extractRoot)) {
+    if (-not (Test-Path -LiteralPath $extractRoot)) {
         throw "Extracted Node.js folder not found: $extractRoot"
     }
 
-    if (Test-Path $UserNodeRoot) {
-        Remove-Item -Recurse -Force $UserNodeRoot
+    if (Test-Path -LiteralPath $UserNodeRoot) {
+        Remove-Item -LiteralPath $UserNodeRoot -Recurse -Force
     }
 
     New-Item -ItemType Directory -Path (Split-Path -Parent $UserNodeRoot) -Force | Out-Null
-    Move-Item -Path $extractRoot -Destination $UserNodeRoot
+    Move-Item -LiteralPath $extractRoot -Destination $UserNodeRoot
 
-    if (-not (Test-Path (Join-Path $UserNodeRoot 'node.exe'))) {
+    if (-not (Test-Path -LiteralPath (Join-Path $UserNodeRoot 'node.exe'))) {
         throw "node.exe not found in: $UserNodeRoot"
     }
 
-    Ensure-UserPathContains $UserNodeRoot
-    if (-not (($env:Path -split ';') -contains $UserNodeRoot)) {
-        $env:Path = "$UserNodeRoot;$env:Path"
-    }
+    Ensure-UserPathContains $UserNodeRoot -Prepend:$script:UseAsciiSafePaths
+    Ensure-CurrentPathContains $UserNodeRoot -Prepend
 
     Write-Ok "Node.js: $(& (Join-Path $UserNodeRoot 'node.exe') -v)"
     Write-Ok "npm: $(& (Join-Path $UserNodeRoot 'npm.cmd') -v)"
@@ -823,7 +1030,17 @@ function Ensure-Node {
     # Prefer any existing Node/npm available on PATH (system install or other managed installs).
     # Only fall back to downloading a user-local Node zip if Node/npm are not present.
     Refresh-Path
-    if ((Test-PreexistingNodeAndNpm) -and -not $ForceNodeReinstall) {
+    $preexistingNodeReady = Test-PreexistingNodeAndNpm
+    if ($preexistingNodeReady -and $script:UseAsciiSafePaths) {
+        $resolvedNodeDir = Resolve-NodeInstallDir
+        if (Test-ContainsNonAscii $resolvedNodeDir) {
+            Write-WarnMsg "Existing Node.js path contains non-ASCII characters: $resolvedNodeDir"
+            Write-Info "Installing a separate ASCII-safe Node.js copy under: $UserNodeRoot"
+            $preexistingNodeReady = $false
+        }
+    }
+
+    if ($preexistingNodeReady -and -not $ForceNodeReinstall) {
         Write-Info 'Node.js and npm already present.'
         Write-Ok ("Node.js: " + (node -v))
         Write-Ok ("npm: " + (npm -v))
@@ -832,7 +1049,7 @@ function Ensure-Node {
 
     if ($ForceNodeReinstall -and (Test-Path $UserNodeRoot)) {
         Write-Info "Removing previous user Node.js install at $UserNodeRoot"
-        Remove-Item -Recurse -Force $UserNodeRoot
+        Remove-Item -LiteralPath $UserNodeRoot -Recurse -Force
     }
 
     Install-NodeUserZip
@@ -1082,13 +1299,13 @@ function Ensure-CodexCommandWorks([string]$NpmBinDir) {
 
 function Install-CodexPackage {
     Write-Info 'Installing Codex CLI...'
-    & npm i -g @openai/codex
+    & npm install -g --prefix $script:CodexNpmPrefix '@openai/codex'
     $installExit = $LASTEXITCODE
     if ($installExit -eq 0) {
         return
     }
 
-    $logDir = Join-Path $env:LOCALAPPDATA 'npm-cache\_logs'
+    $logDir = Join-Path $script:CodexNpmCache '_logs'
     $latestLog = $null
     if (Test-Path $logDir) {
         $latestLog = Get-ChildItem -Path $logDir -Filter '*-debug-0.log' -ErrorAction SilentlyContinue |
@@ -1105,7 +1322,7 @@ function Install-CodexPackage {
     Get-Process -Name codex -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 
-    & npm i -g @openai/codex
+    & npm install -g --prefix $script:CodexNpmPrefix '@openai/codex'
     $retryExit = $LASTEXITCODE
     if ($retryExit -ne 0) {
         throw "npm install -g @openai/codex failed (exit $retryExit). Close terminals/tools using codex.exe and retry."
@@ -1113,10 +1330,7 @@ function Install-CodexPackage {
 }
 
 function Ensure-Codex {
-    $userNpmBinDir = $null
-    if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
-        $userNpmBinDir = Join-Path $env:APPDATA 'npm'
-    }
+    $userNpmBinDir = $script:CodexNpmPrefix
 
     Write-Info 'Checking for system-level Codex CLI before user install...'
     Ensure-NoSystemCodex $userNpmBinDir
@@ -1125,7 +1339,7 @@ function Ensure-Codex {
 
     if ($ForceCodexReinstall) {
         Write-Info 'Force reinstall requested: uninstalling existing Codex CLI...'
-        npm uninstall -g @openai/codex | Out-Null
+        npm uninstall -g --prefix $npmBinDir '@openai/codex' | Out-Null
     }
 
     $existingCodexVersion = $null
@@ -1156,17 +1370,15 @@ function Ensure-Codex {
         Install-CodexPackage
     }
 
-    Ensure-UserPathContains $npmBinDir
+    Ensure-UserPathContains $npmBinDir -Prepend:$script:UseAsciiSafePaths
     $nodeInstallDir = Resolve-NodeInstallDir
     if ($nodeInstallDir) {
-        Ensure-UserPathContains $nodeInstallDir
+        Ensure-UserPathContains $nodeInstallDir -Prepend:$script:UseAsciiSafePaths
     }
 
-    if (-not (($env:Path -split ';') -contains $npmBinDir)) {
-        $env:Path = "$env:Path;$npmBinDir"
-    }
-    if ($nodeInstallDir -and -not (($env:Path -split ';') -contains $nodeInstallDir)) {
-        $env:Path = "$env:Path;$nodeInstallDir"
+    Ensure-CurrentPathContains $npmBinDir -Prepend:$script:UseAsciiSafePaths
+    if ($nodeInstallDir) {
+        Ensure-CurrentPathContains $nodeInstallDir -Prepend:$script:UseAsciiSafePaths
     }
     Refresh-Path
 
@@ -1178,7 +1390,7 @@ function Configure-CrsFiles {
         [switch]$CleanExistingConfig
     )
 
-    $codexDir = Join-Path $env:USERPROFILE '.codex'
+    $codexDir = $script:CodexHome
     $configPath = Join-Path $codexDir 'config.toml'
     $authPath = Join-Path $codexDir 'auth.json'
 
@@ -1189,6 +1401,10 @@ function Configure-CrsFiles {
     $crsKey = Read-SecretInput 'Enter CRS_OAI_KEY (input hidden)'
 
     New-Item -ItemType Directory -Path $codexDir -Force | Out-Null
+    if ($script:UseAsciiSafePaths) {
+        $env:CODEX_HOME = $codexDir
+        [Environment]::SetEnvironmentVariable('CODEX_HOME', $codexDir, 'User')
+    }
     if ($CleanExistingConfig) {
         Write-Info 'Detected existing node/npm/codex; cleaning old CRS configuration before regenerating...'
         Clear-ExistingCrsConfig -CodexDir $codexDir
@@ -1261,6 +1477,7 @@ if (-not [string]::IsNullOrWhiteSpace($UninstallSystemCodexPrefix)) {
 }
 
 Write-Info 'Starting install for Codex CLI and dependencies...'
+Initialize-AsciiSafeEnvironment
 $cleanExistingConfig = $false
 try {
     $cleanExistingConfig = Test-PreexistingNodeNpmCodex

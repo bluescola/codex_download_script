@@ -20,6 +20,12 @@
 - 第一次安装 Codex CLI
 - 想重新跑一遍安装流程，并确保 `NO_PROXY` 设置到位
 
+中文用户目录兼容：
+- 如果检测到 `USERPROFILE` / `APPDATA` / `LOCALAPPDATA` / `TEMP` 等路径包含中文或其他非 ASCII 字符，安装脚本会自动启用“ASCII 安全路径”。
+- 启用后，Node、npm 全局包、npm 缓存和 Codex 配置会放到类似 `C:\Users\Public\Codex` 的英文路径下，避免 Codex 原生程序或 npm wrapper 在中文用户目录中启动失败。
+- 脚本会同步写入用户级环境变量：`NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`、`NPM_CONFIG_USERCONFIG`、`CODEX_HOME`，并把对应 npm bin 目录加入用户 `Path`。
+- 如需自定义英文根目录，可在运行前设置用户/进程环境变量 `CODEX_WINDOWS_ASCII_ROOT`，例如 `C:\CodexData`。
+
 ## 2) `check-codex-env.cmd`
 
 用途：检查（并尽量修复）运行 Codex CLI 所需的环境是否正常。
@@ -29,6 +35,7 @@
   - 检查 `node` / `npm` / `codex` 命令是否可用、路径是否正确
   - 检查/修复 `PATH`（把 codex 的 npm bin 目录加入用户 Path，必要时刷新当前进程 Path）
   - 检查 PowerShell 执行策略导致的 `codex.ps1` 受限问题，并给出修复建议（部分情况下会尝试自动修复）
+  - 在中文用户目录场景下优先检查 ASCII 安全 npm prefix，并提示是否需要重新运行安装脚本迁移
 
 常用参数（会透传给 `check-codex-env.ps1`）：
 - `-AsJson`：以 JSON 输出结果（便于复制/上报）

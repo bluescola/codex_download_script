@@ -6,6 +6,52 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Test-ContainsNonAscii([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    return [regex]::IsMatch($Value, '[^\x00-\x7F]')
+}
+
+function Resolve-AsciiSafeRoot {
+    foreach ($candidate in @(
+        $env:CODEX_WINDOWS_ASCII_ROOT,
+        $(if (-not [string]::IsNullOrWhiteSpace($env:PUBLIC)) { Join-Path $env:PUBLIC 'Codex' }),
+        $(if (-not [string]::IsNullOrWhiteSpace($env:ProgramData)) { Join-Path $env:ProgramData 'Codex' }),
+        'C:\Codex'
+    )) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+
+        $trimmed = $candidate.Trim().TrimEnd('\')
+        if (-not (Test-ContainsNonAscii $trimmed)) {
+            return $trimmed
+        }
+    }
+
+    return 'C:\Codex'
+}
+
+function Test-NeedsAsciiSafePaths {
+    foreach ($value in @($env:USERPROFILE, $env:APPDATA, $env:LOCALAPPDATA, $env:TEMP, $env:TMP)) {
+        if (Test-ContainsNonAscii $value) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+$script:UseAsciiSafePaths = Test-NeedsAsciiSafePaths
+$script:CodexAsciiRoot = Resolve-AsciiSafeRoot
+$script:CodexAsciiNpmPrefix = if ($script:UseAsciiSafePaths) {
+    Join-Path $script:CodexAsciiRoot 'npm'
+} else {
+    $null
+}
+
 function Write-Info([string]$Message) {
     Write-Host "[INFO] $Message" -ForegroundColor Cyan
 }
@@ -50,24 +96,32 @@ function New-PathSet([string]$PathValue) {
     return $set
 }
 
-function Add-PathToCurrentProcess([string]$PathEntry) {
+function Add-PathToCurrentProcess([string]$PathEntry, [switch]$Prepend) {
     if ([string]::IsNullOrWhiteSpace($PathEntry)) {
         return
     }
 
     $normalized = Normalize-Path $PathEntry
-    $currentSet = New-PathSet $env:Path
-    if (-not $currentSet.Contains($normalized)) {
-        if ([string]::IsNullOrWhiteSpace($env:Path)) {
+    $parts = Split-PathEntries $env:Path
+    $remaining = @($parts | Where-Object { (Normalize-Path $_) -ne $normalized })
+    if (($remaining.Count -ne $parts.Count) -and -not $Prepend) {
+        return
+    }
+
+    if ($Prepend) {
+        $env:Path = @($PathEntry; $remaining) -join ';'
+    }
+    else {
+        if ($remaining.Count -eq 0) {
             $env:Path = $PathEntry
         }
         else {
-            $env:Path = "$env:Path;$PathEntry"
+            $env:Path = @($remaining; $PathEntry) -join ';'
         }
     }
 }
 
-function Ensure-UserPathContains([string]$PathEntry) {
+function Ensure-UserPathContains([string]$PathEntry, [switch]$Prepend) {
     if ([string]::IsNullOrWhiteSpace($PathEntry)) {
         return $false
     }
@@ -78,17 +132,18 @@ function Ensure-UserPathContains([string]$PathEntry) {
 
     $normalized = Normalize-Path $PathEntry
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $userSet = New-PathSet $userPath
+    $parts = Split-PathEntries $userPath
+    $remaining = @($parts | Where-Object { (Normalize-Path $_) -ne $normalized })
 
-    if ($userSet.Contains($normalized)) {
+    if (($remaining.Count -ne $parts.Count) -and -not $Prepend) {
         return $true
     }
 
-    $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) {
-        $PathEntry
+    $newUserPath = if ($Prepend) {
+        @($PathEntry; $remaining) -join ';'
     }
     else {
-        "$userPath;$PathEntry"
+        @($remaining; $PathEntry) -join ';'
     }
 
     [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
@@ -116,14 +171,22 @@ function Try-GetNpmPrefix {
 function Resolve-CodexBinDir {
     $candidates = New-Object System.Collections.Generic.List[string]
 
-    if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
-        $appDataNpm = Join-Path $env:APPDATA 'npm'
-        [void]$candidates.Add($appDataNpm)
+    if (-not [string]::IsNullOrWhiteSpace($env:NPM_CONFIG_PREFIX)) {
+        [void]$candidates.Add($env:NPM_CONFIG_PREFIX)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($script:CodexAsciiNpmPrefix)) {
+        [void]$candidates.Add($script:CodexAsciiNpmPrefix)
     }
 
     $npmPrefix = Try-GetNpmPrefix
     if (-not [string]::IsNullOrWhiteSpace($npmPrefix)) {
         [void]$candidates.Add($npmPrefix)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        $appDataNpm = Join-Path $env:APPDATA 'npm'
+        [void]$candidates.Add($appDataNpm)
     }
 
     $codexCommands = @(Get-Command codex -All -ErrorAction SilentlyContinue)
@@ -193,7 +256,7 @@ function Get-CodexRuntimeHint([int]$ExitCode) {
             if (Test-Path $helperScript) {
                 $hint += ' You can run install-vc-redist-x64.cmd from this package.'
             }
-            $hint += ' If the runtime is already installed, inspect antivirus/AppLocker and the native executable under %APPDATA%\npm\node_modules\@openai\codex.'
+            $hint += ' If the runtime is already installed, inspect antivirus/AppLocker and the native executable under the configured npm prefix (for example %APPDATA%\npm or C:\Users\Public\Codex\npm).'
             return $hint
         }
         default {
@@ -444,6 +507,12 @@ Write-Host '=== Codex Env Check ===' -ForegroundColor White
 Write-Info "PowerShell: $($PSVersionTable.PSVersion)"
 Write-Info "User: $env:USERNAME"
 Write-Info "Host: $env:COMPUTERNAME"
+if ($script:UseAsciiSafePaths) {
+    Write-WarnMsg "Detected non-ASCII user paths. Expected ASCII-safe Codex npm prefix: $script:CodexAsciiNpmPrefix"
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+        Write-Info "CODEX_HOME: $env:CODEX_HOME"
+    }
+}
 
 Write-Host ''
 Write-Info 'Checking Codex PATH entry...'
@@ -456,6 +525,12 @@ if ([string]::IsNullOrWhiteSpace($codexBinDir)) {
     Write-Fail $msg
 }
 else {
+    if ($script:UseAsciiSafePaths -and (Test-ContainsNonAscii $codexBinDir)) {
+        $msg = "Codex is installed under a non-ASCII path: $codexBinDir. Rerun install-codex-cli.cmd to move npm prefix and CODEX_HOME to the ASCII-safe root: $script:CodexAsciiRoot"
+        $warnings.Add($msg)
+        Write-WarnMsg $msg
+    }
+
     $normalizedCodex = Normalize-Path $codexBinDir
     $currentSet = New-PathSet $env:Path
     $userSet = New-PathSet ([Environment]::GetEnvironmentVariable('Path', 'User'))
@@ -470,7 +545,7 @@ else {
         Write-Ok "Codex PATH already exists: $codexBinDir"
 
         if (-not $inCurrent -and ($inUser -or $inMachine)) {
-            Add-PathToCurrentProcess $codexBinDir
+            Add-PathToCurrentProcess $codexBinDir -Prepend:$script:UseAsciiSafePaths
             $msg = 'PATH exists in persistent env but not current shell; current shell PATH was refreshed.'
             $warnings.Add($msg)
             Write-WarnMsg $msg
@@ -479,8 +554,8 @@ else {
     else {
         Write-WarnMsg "Codex PATH is missing: $codexBinDir"
 
-        if (Ensure-UserPathContains $codexBinDir) {
-            Add-PathToCurrentProcess $codexBinDir
+        if (Ensure-UserPathContains $codexBinDir -Prepend:$script:UseAsciiSafePaths) {
+            Add-PathToCurrentProcess $codexBinDir -Prepend:$script:UseAsciiSafePaths
             $codexPathStatus = 'added'
             Write-Ok "Codex PATH has been added to USER Path: $codexBinDir"
         }
