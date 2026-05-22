@@ -2,10 +2,19 @@
 set -euo pipefail
 
 read -r -p "请输入 base_url: " BASE_URL
-read -r -p "请输入 CRS_OAI_KEY: " CRS_OAI_KEY
+read -r -s -p "请输入 CRS_OAI_KEY（隐藏输入）: " CRS_OAI_KEY
+printf '\n'
 
-CODEX_DIR="$HOME/.codex"
+BASE_URL="$(printf '%s' "$BASE_URL" | tr -d '\000-\037\177')"
+CRS_OAI_KEY="$(printf '%s' "$CRS_OAI_KEY" | tr -d '\000-\037\177')"
+if [[ -z "$BASE_URL" || -z "$CRS_OAI_KEY" ]]; then
+  echo "base_url 和 CRS_OAI_KEY 不能为空" >&2
+  exit 1
+fi
+
+CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 CONFIG_PATH="$CODEX_DIR/config.toml"
+AUTH_PATH="$CODEX_DIR/auth.json"
 
 confirm_create() {
   local target="$1"
@@ -17,6 +26,133 @@ confirm_create() {
   esac
 }
 
+toml_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+shell_single_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+backup_if_exists() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    cp -f "$path" "${path}.bak.$(date +%Y%m%d-%H%M%S)"
+  fi
+}
+
+write_default_config() {
+  local file="$1"
+  local base_url="$2"
+  cat > "$file" <<CFG
+model_provider = "crs"
+model = "gpt-5.2"
+model_reasoning_effort = "xhigh"
+disable_response_storage = true
+preferred_auth_method = "apikey"
+
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[model_providers.crs]
+name = "crs"
+base_url = "$base_url"
+wire_api = "responses"
+requires_openai_auth = false
+env_key = "CRS_OAI_KEY"
+
+[features]
+tui_app_server = false
+apps = false
+CFG
+}
+
+upsert_toml_section_kv() {
+  local file="$1"
+  local section="$2"
+  local key="$3"
+  local newline="$4"
+  local tmp
+  tmp="$(mktemp)"
+
+  awk -v section="$section" -v key="$key" -v newline="$newline" '
+    function is_section(line) { return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/ }
+    function section_name(line, s) {
+      s=line
+      sub(/^[[:space:]]*\[/, "", s)
+      sub(/\][[:space:]]*$/, "", s)
+      return s
+    }
+    BEGIN { in_target=0; section_found=0; key_written=0 }
+    is_section($0) {
+      if (in_target && !key_written) {
+        print newline
+        key_written=1
+      }
+      in_target=(section_name($0) == section)
+      if (in_target) {
+        section_found=1
+        key_written=0
+      }
+      print
+      next
+    }
+    in_target && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+      if (!key_written) {
+        print newline
+        key_written=1
+      }
+      next
+    }
+    { print }
+    END {
+      if (in_target && !key_written) {
+        print newline
+      }
+      if (!section_found) {
+        print ""
+        print "[" section "]"
+        print newline
+      }
+    }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
+
+upsert_export_line() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local quoted tmp
+  quoted="$(shell_single_quote "$value")"
+  tmp="$(mktemp)"
+
+  if [[ -f "$file" ]]; then
+    awk -v key="$key" -v quoted="$quoted" '
+      BEGIN { done=0 }
+      $0 ~ "^[[:space:]]*export[[:space:]]+" key "=" {
+        if (!done) {
+          print "export " key "=" quoted
+          done=1
+        }
+        next
+      }
+      { print }
+      END {
+        if (!done) {
+          print ""
+          print "export " key "=" quoted
+        }
+      }
+    ' "$file" > "$tmp"
+  else
+    printf 'export %s=%s\n' "$key" "$quoted" > "$tmp"
+  fi
+  mv "$tmp" "$file"
+}
+
 if [[ ! -d "$CODEX_DIR" ]]; then
   if confirm_create "$CODEX_DIR"; then
     mkdir -p "$CODEX_DIR"
@@ -26,107 +162,54 @@ if [[ ! -d "$CODEX_DIR" ]]; then
   fi
 fi
 
-if [[ ! -f "$CONFIG_PATH" ]]; then
+escaped_base_url="$(toml_escape "$BASE_URL")"
+
+if [[ -f "$CONFIG_PATH" ]]; then
+  backup_if_exists "$CONFIG_PATH"
+else
   if confirm_create "$CONFIG_PATH"; then
-    touch "$CONFIG_PATH"
+    write_default_config "$CONFIG_PATH" "$escaped_base_url"
   else
     echo "已中止：需要 $CONFIG_PATH"
     exit 1
   fi
 fi
 
-# Pick a shell rc file to persist CRS_OAI_KEY.
-# macOS default shell is zsh; fall back to bash if needed.
-RC_PATH="$HOME/.zshrc"
-if [[ "${SHELL:-}" == *"bash" ]]; then
-  RC_PATH="$HOME/.bashrc"
-fi
-
-if [[ ! -f "$RC_PATH" ]]; then
-  if confirm_create "$RC_PATH"; then
-    touch "$RC_PATH"
-  else
-    echo "已中止：需要 $RC_PATH"
-    exit 1
-  fi
-fi
-
-escape_quotes() {
-  printf '%s' "$1" | sed 's/"/\\"/g'
-}
-
-escaped_base_url="$(escape_quotes "$BASE_URL")"
-escaped_key="$(escape_quotes "$CRS_OAI_KEY")"
-
-base_line="base_url = \"${escaped_base_url}\""
-requires_line="requires_openai_auth = false"
-key_line="export CRS_OAI_KEY=\"${escaped_key}\""
-
 requires_was_true=0
-if [[ -f "$CONFIG_PATH" ]] && grep -qiE '^[[:space:]]*requires_openai_auth[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$CONFIG_PATH"; then
+if grep -qiE '^[[:space:]]*requires_openai_auth[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$CONFIG_PATH"; then
   requires_was_true=1
 fi
 
-upsert_toml_kv() {
-  local file="$1"
-  local key="$2"
-  local newline="$3"
-  local tmp
+upsert_toml_section_kv "$CONFIG_PATH" "model_providers.crs" "base_url" "base_url = \"$escaped_base_url\""
+upsert_toml_section_kv "$CONFIG_PATH" "model_providers.crs" "requires_openai_auth" "requires_openai_auth = false"
 
-  tmp="$(mktemp)"
-  awk -v k="$key" -v nl="$newline" '
-    BEGIN{found=0}
-    $0 ~ "^[[:space:]]*" k "[[:space:]]*=" {
-      print nl
-      found=1
-      next
-    }
-    { print }
-    END{
-      if (!found) {
-        if (NR>0) print ""
-        print nl
-      }
-    }
-  ' "$file" > "$tmp"
-  mv "$tmp" "$file"
+rc_files=("$HOME/.zshrc" "$HOME/.zprofile")
+if [[ "${SHELL:-}" == *"bash" ]]; then
+  rc_files=("$HOME/.bash_profile" "$HOME/.bashrc")
+fi
+
+for rc_path in "${rc_files[@]}"; do
+  if [[ ! -f "$rc_path" ]]; then
+    touch "$rc_path"
+  fi
+  upsert_export_line "$rc_path" "CRS_OAI_KEY" "$CRS_OAI_KEY"
+  upsert_export_line "$rc_path" "CODEX_HOME" "$CODEX_DIR"
+  echo "已更新：$rc_path"
+done
+
+if [[ -f "$AUTH_PATH" ]]; then
+  backup_if_exists "$AUTH_PATH"
+fi
+cat > "$AUTH_PATH" <<'AUTH'
+{
+  "OPENAI_API_KEY": null
 }
-
-upsert_export_line() {
-  local file="$1"
-  local newline="$2"
-  local tmp
-
-  tmp="$(mktemp)"
-  awk -v nl="$newline" '
-    BEGIN{found=0}
-    $0 ~ "^[[:space:]]*export[[:space:]]+CRS_OAI_KEY=" {
-      print nl
-      found=1
-      next
-    }
-    { print }
-    END{
-      if (!found) {
-        if (NR>0) print ""
-        print nl
-      }
-    }
-  ' "$file" > "$tmp"
-  mv "$tmp" "$file"
-}
-
-upsert_toml_kv "$CONFIG_PATH" "base_url" "$base_line"
-upsert_toml_kv "$CONFIG_PATH" "requires_openai_auth" "$requires_line"
-upsert_export_line "$RC_PATH" "$key_line"
+AUTH
 
 echo "已更新：$CONFIG_PATH"
-echo "已更新：$RC_PATH"
+echo "已确认：$AUTH_PATH"
 echo "推荐：打开一个新的终端窗口使其生效。"
-echo "如需在当前终端生效（二选一）："
-echo "  # 方式 A（推荐）：source 你的 rc 文件：source \"$RC_PATH\""
-echo "  # 方式 B：临时 export（仅当前终端会话）："
-echo "  export CRS_OAI_KEY=\"${escaped_key}\""
+echo "如需在当前终端生效，请 source 上方更新的 rc 文件。"
 if [[ "$requires_was_true" -eq 1 ]]; then
   echo "提示：requires_openai_auth 原为 true，已改为 false。"
 fi

@@ -8,9 +8,10 @@
   - 写入/更新 `~/.codex/config.toml`：
     - `base_url = "..."`（存在则替换，不存在则追加）
     - `requires_openai_auth = false`（存在则替换，不存在则追加）
-  - 写入/更新 shell rc 文件（用于持久化 `CRS_OAI_KEY`）：
-    - 默认写 `~/.zshrc`（macOS 默认 shell）
-    - 若检测到 `$SHELL` 包含 `bash`，则写 `~/.bashrc`
+  - 写入/更新 `auth.json`，确保 `OPENAI_API_KEY` 为 `null`
+  - 写入/更新 shell rc 文件（用于持久化 `CRS_OAI_KEY` 和 `CODEX_HOME`）：
+    - 默认写 `~/.zshrc` 与 `~/.zprofile`（macOS 默认 zsh）
+    - 若检测到 `$SHELL` 包含 `bash`，则写 `~/.bash_profile` 与 `~/.bashrc`
 - `一键-替换codex-key.command`
   - Finder 双击运行的包装脚本（内部调用 `codex-key-replace-mac.sh`）
 
@@ -20,5 +21,4 @@
 
 生效说明：
 - 写入 rc 文件后，推荐“新开一个终端”使其生效。
-- 如需当前终端立即生效，按脚本输出提示 `source ~/.zshrc`（或对应 rc 文件）。
-
+- 如需当前终端立即生效，按脚本输出提示 source 对应 rc/profile 文件。
