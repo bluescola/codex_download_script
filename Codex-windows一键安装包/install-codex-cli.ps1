@@ -2,6 +2,7 @@ param(
     [switch]$ForceNodeReinstall,
     [switch]$ForceCodexReinstall,
     [switch]$SkipCrsConfig,
+    [switch]$RemoveSystemCodex,
     [string]$UninstallSystemCodexPrefix,
     [string]$NpmCommandPath
 )
@@ -767,6 +768,20 @@ function Ensure-NoSystemCodex([string]$UserNpmBinDir) {
     Write-Ok 'System-level Codex CLI removed.'
 }
 
+function Warn-SystemCodex([string]$UserNpmBinDir) {
+    $systemInstalls = @(Find-SystemCodexInstalls -UserNpmBinDir $UserNpmBinDir)
+    if ($systemInstalls.Count -eq 0) {
+        Write-Info 'No system-level Codex CLI detected.'
+        return
+    }
+
+    foreach ($install in $systemInstalls) {
+        Write-WarnMsg "Detected system-level Codex CLI: $($install.PrefixDir)"
+    }
+    Write-WarnMsg 'Leaving system-level Codex untouched. This installer will put the user npm bin directory first in PATH.'
+    Write-WarnMsg 'If you explicitly want to remove system-level Codex, rerun with -RemoveSystemCodex.'
+}
+
 function Ensure-NpmUserPrefix {
     Ensure-CodexPathSettings
 
@@ -920,39 +935,8 @@ function Clear-ExistingCrsConfig {
         return
     }
 
-    $targets = @(
-        Join-Path $CodexDir 'config.toml'
-        Join-Path $CodexDir 'auth.json'
-    )
-
-    foreach ($file in $targets) {
-        if (Test-Path $file) {
-            try {
-                Remove-Item -LiteralPath $file -Force -ErrorAction Stop
-                Write-Info "Removed old config: $file"
-            }
-            catch {
-                Write-WarnMsg "Failed to remove ${file}: $($_.Exception.Message)"
-            }
-        }
-    }
-
-    foreach ($pattern in @('config.toml.bak.*', 'auth.json.bak.*')) {
-        try {
-            $matches = @(Get-ChildItem -Path $CodexDir -Force -File -Filter $pattern -ErrorAction SilentlyContinue)
-            foreach ($m in $matches) {
-                try {
-                    Remove-Item -LiteralPath $m.FullName -Force -ErrorAction Stop
-                    Write-Info "Removed old backup: $($m.FullName)"
-                }
-                catch {
-                    Write-WarnMsg "Failed to remove $($m.FullName): $($_.Exception.Message)"
-                }
-            }
-        }
-        catch {
-        }
-    }
+    Backup-FileIfExists (Join-Path $CodexDir 'config.toml')
+    Backup-FileIfExists (Join-Path $CodexDir 'auth.json')
 
     # Avoid leaking/using stale keys between reconfiguration runs.
     try {
@@ -994,12 +978,10 @@ function Write-CodexConfigFiles {
     $authPath = Join-Path $CodexDir 'auth.json'
 
     if ($CleanExistingConfig) {
-        Clear-ExistingCrsConfig -CodexDir $CodexDir
+        Write-Info 'Existing Codex configuration detected; backing it up before writing new CRS files.'
     }
-    else {
-        Backup-FileIfExists $configPath
-        Backup-FileIfExists $authPath
-    }
+    Backup-FileIfExists $configPath
+    Backup-FileIfExists $authPath
 
     [System.IO.File]::WriteAllText($configPath, $ConfigToml, $Encoding)
     [System.IO.File]::WriteAllText($authPath, $AuthJson, $Encoding)
@@ -1051,13 +1033,16 @@ function Invoke-CrsResponsesRouteProbe([string]$BaseUrl) {
 function Resolve-CrsBaseUrl([string]$BaseUrl) {
     $trimmed = $BaseUrl.Trim().TrimEnd('/')
     $probe = Invoke-CrsResponsesRouteProbe $trimmed
-    if ($probe -and ($probe.StatusCode -ne 404)) {
+    if ($probe -and ($null -ne $probe.StatusCode) -and ($probe.StatusCode -ne 404)) {
         Write-Info "CRS Responses route probe: $($probe.StatusCode) $($probe.Url)"
         return $trimmed
     }
 
-    if ($probe) {
+    if ($probe -and ($probe.StatusCode -eq 404)) {
         Write-WarnMsg "CRS Responses route probe returned 404: $($probe.Url)"
+    }
+    elseif ($probe) {
+        Write-WarnMsg "Could not verify CRS Responses route: $($probe.Url). $($probe.ErrorMessage)"
     }
 
     $candidate = $null
@@ -1075,7 +1060,7 @@ function Resolve-CrsBaseUrl([string]$BaseUrl) {
 
     if (-not [string]::IsNullOrWhiteSpace($candidate)) {
         $candidateProbe = Invoke-CrsResponsesRouteProbe $candidate
-        if ($candidateProbe -and ($candidateProbe.StatusCode -ne 404)) {
+        if ($candidateProbe -and ($null -ne $candidateProbe.StatusCode) -and ($candidateProbe.StatusCode -ne 404)) {
             Write-WarnMsg "The entered CRS base_url does not expose /responses. Using detected OpenAI-compatible base_url instead: $candidate"
             Write-Info "CRS Responses route probe: $($candidateProbe.StatusCode) $($candidateProbe.Url)"
             return $candidate
@@ -1137,6 +1122,79 @@ function Get-NodeLtsZipInfo {
     return $lts
 }
 
+function Get-NodeExpectedSha256 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Version,
+        [Parameter(Mandatory = $true)]
+        [string]$FileName
+    )
+
+    $shaUrl = "https://nodejs.org/dist/$Version/SHASUMS256.txt"
+    Write-Info "Downloading checksum manifest: $shaUrl"
+    $manifest = Invoke-WebRequest -Uri $shaUrl -UseBasicParsing
+    foreach ($line in ($manifest.Content -split "`r?`n")) {
+        if ($line -match '^([0-9a-fA-F]{64})\s+(.+)$' -and $matches[2] -eq $FileName) {
+            return $matches[1].ToLowerInvariant()
+        }
+    }
+
+    throw "Could not find checksum for $FileName in $shaUrl"
+}
+
+function Assert-FileSha256 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedHash
+    )
+
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $ExpectedHash.ToLowerInvariant()) {
+        throw "SHA256 verification failed for $Path. Expected $ExpectedHash, got $actual"
+    }
+
+    Write-Ok "SHA256 verified: $actual"
+}
+
+function Install-ExtractedNodeAtomically {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExtractRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$TargetRoot
+    )
+
+    $parent = Split-Path -Parent $TargetRoot
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+
+    $backupRoot = $null
+    if (Test-Path -LiteralPath $TargetRoot) {
+        $backupSuffix = "{0}.{1}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+        $backupRoot = "$TargetRoot.bak.$backupSuffix"
+        Write-Info "Moving existing Node.js install to backup: $backupRoot"
+        Move-Item -LiteralPath $TargetRoot -Destination $backupRoot -Force
+    }
+
+    try {
+        Move-Item -LiteralPath $ExtractRoot -Destination $TargetRoot -Force
+        if (-not (Test-Path -LiteralPath (Join-Path $TargetRoot 'node.exe'))) {
+            throw "node.exe not found in: $TargetRoot"
+        }
+
+        if ($backupRoot -and (Test-Path -LiteralPath $backupRoot)) {
+            Remove-Item -LiteralPath $backupRoot -Recurse -Force
+        }
+    }
+    catch {
+        if ((-not (Test-Path -LiteralPath $TargetRoot)) -and $backupRoot -and (Test-Path -LiteralPath $backupRoot)) {
+            Move-Item -LiteralPath $backupRoot -Destination $TargetRoot -Force
+        }
+        throw
+    }
+}
+
 function Install-NodeUserZip {
     Ensure-CodexPathSettings
 
@@ -1144,29 +1202,33 @@ function Install-NodeUserZip {
 
     $lts = Get-NodeLtsZipInfo
     $version = $lts.version
-    $zipUrl = "https://nodejs.org/dist/$version/node-$version-win-x64.zip"
+    $zipName = "node-$version-win-x64.zip"
+    $zipUrl = "https://nodejs.org/dist/$version/$zipName"
     $tempRoot = if ([string]::IsNullOrWhiteSpace($script:CodexTempRoot)) { $env:TEMP } else { $script:CodexTempRoot }
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-    $zipPath = Join-Path $tempRoot "node-$version-win-x64.zip"
-    $extractRoot = Join-Path $tempRoot "node-$version-win-x64"
+    $workRoot = Join-Path $tempRoot ("codex-node-install-{0}" -f ([guid]::NewGuid().ToString('N')))
+    New-Item -ItemType Directory -Path $workRoot -Force | Out-Null
+    $zipPath = Join-Path $workRoot $zipName
+    $extractRoot = Join-Path $workRoot "node-$version-win-x64"
 
-    if (Test-Path -LiteralPath $extractRoot) {
-        Remove-Item -LiteralPath $extractRoot -Recurse -Force
+    try {
+        Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+        $expectedHash = Get-NodeExpectedSha256 -Version $version -FileName $zipName
+        Assert-FileSha256 -Path $zipPath -ExpectedHash $expectedHash
+
+        Expand-Archive -Path $zipPath -DestinationPath $workRoot -Force
+
+        if (-not (Test-Path -LiteralPath $extractRoot)) {
+            throw "Extracted Node.js folder not found: $extractRoot"
+        }
+
+        Install-ExtractedNodeAtomically -ExtractRoot $extractRoot -TargetRoot $UserNodeRoot
     }
-
-    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
-    Expand-Archive -Path $zipPath -DestinationPath $tempRoot -Force
-
-    if (-not (Test-Path -LiteralPath $extractRoot)) {
-        throw "Extracted Node.js folder not found: $extractRoot"
+    finally {
+        if (Test-Path -LiteralPath $workRoot) {
+            Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
-
-    if (Test-Path -LiteralPath $UserNodeRoot) {
-        Remove-Item -LiteralPath $UserNodeRoot -Recurse -Force
-    }
-
-    New-Item -ItemType Directory -Path (Split-Path -Parent $UserNodeRoot) -Force | Out-Null
-    Move-Item -LiteralPath $extractRoot -Destination $UserNodeRoot
 
     if (-not (Test-Path -LiteralPath (Join-Path $UserNodeRoot 'node.exe'))) {
         throw "node.exe not found in: $UserNodeRoot"
@@ -1203,8 +1265,7 @@ function Ensure-Node {
     }
 
     if ($ForceNodeReinstall -and (Test-Path $UserNodeRoot)) {
-        Write-Info "Removing previous user Node.js install at $UserNodeRoot"
-        Remove-Item -LiteralPath $UserNodeRoot -Recurse -Force
+        Write-Info "Force reinstall requested; existing user Node.js install will be replaced atomically: $UserNodeRoot"
     }
 
     Install-NodeUserZip
@@ -1494,7 +1555,12 @@ function Ensure-Codex {
     $userNpmBinDir = $script:CodexNpmPrefix
 
     Write-Info 'Checking for system-level Codex CLI before user install...'
-    Ensure-NoSystemCodex $userNpmBinDir
+    if ($RemoveSystemCodex) {
+        Ensure-NoSystemCodex $userNpmBinDir
+    }
+    else {
+        Warn-SystemCodex $userNpmBinDir
+    }
     Ensure-NpmUserPrefix
     $npmBinDir = Resolve-NpmGlobalBinDir
 
@@ -1531,13 +1597,13 @@ function Ensure-Codex {
         Install-CodexPackage
     }
 
-    Ensure-UserPathContains $npmBinDir -Prepend:$script:UseAsciiSafePaths
+    Ensure-UserPathContains $npmBinDir -Prepend
     $nodeInstallDir = Resolve-NodeInstallDir
     if ($nodeInstallDir) {
         Ensure-UserPathContains $nodeInstallDir -Prepend:$script:UseAsciiSafePaths
     }
 
-    Ensure-CurrentPathContains $npmBinDir -Prepend:$script:UseAsciiSafePaths
+    Ensure-CurrentPathContains $npmBinDir -Prepend
     if ($nodeInstallDir) {
         Ensure-CurrentPathContains $nodeInstallDir -Prepend:$script:UseAsciiSafePaths
     }
@@ -1574,10 +1640,9 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 preferred_auth_method = "apikey"
 
-sandbox_mode = "danger-full-access"
+sandbox_mode = "workspace-write"
 approval_policy = "on-request"
-# 或者更激进：
-# approval_policy = "never"
+# 高风险：仅在完全理解风险时才改为 approval_policy = "never"
 
 [model_providers.crs]
 name = "crs"

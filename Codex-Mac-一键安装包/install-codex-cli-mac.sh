@@ -36,7 +36,7 @@ Usage: install-codex-cli-mac.sh [options]
 Options:
   --force-node-reinstall   Force reinstall Node.js/npm (user-only install)
   --force-codex-reinstall  Force reinstall @openai/codex
-  --remove-system-codex    Compatibility flag; system-level @openai/codex removal is automatic
+  --remove-system-codex    Explicitly remove system-level @openai/codex if detected
   --skip-crs-config        Skip interactive CRS config generation
   --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
   -h, --help               Show this help
@@ -55,6 +55,38 @@ log_warn() { printf '[WARN] %s\n' "$*"; }
 log_ok() { printf '[OK] %s\n' "$*"; }
 
 cmd_exists() { command -v "$1" >/dev/null 2>&1; }
+
+verify_download_sha256() {
+  local version="$1"
+  local file_name="$2"
+  local file_path="$3"
+  local sums_url expected actual
+
+  sums_url="https://nodejs.org/dist/${version}/SHASUMS256.txt"
+  log_info "Downloading checksum manifest: $sums_url"
+  expected="$(
+    curl -fsSL "$sums_url" |
+      awk -v f="$file_name" '$2 == f { print $1; found=1 } END { if (!found) exit 1 }'
+  )"
+
+  if cmd_exists shasum; then
+    actual="$(shasum -a 256 "$file_path" | awk '{print $1}')"
+  elif cmd_exists sha256sum; then
+    actual="$(sha256sum "$file_path" | awk '{print $1}')"
+  else
+    echo "[ERROR] shasum or sha256sum is required to verify the Node.js download." >&2
+    exit 1
+  fi
+
+  actual="$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')"
+  expected="$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "[ERROR] SHA256 verification failed for $file_name. Expected $expected, got $actual" >&2
+    exit 1
+  fi
+
+  log_ok "SHA256 verified: $actual"
+}
 
 contains_non_ascii() {
   local value="${1:-}"
@@ -89,6 +121,16 @@ backup_if_exists() {
     cp -f "$p" "$bkp"
     log_info "Backed up: $bkp"
   fi
+}
+
+toml_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+shell_single_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
 }
 
 test_preexisting_node_npm() {
@@ -135,24 +177,10 @@ clear_existing_crs_config() {
   auth_path="$codex_dir/auth.json"
 
   if [[ -f "$config_path" ]]; then
-    rm -f "$config_path"
-    log_info "Removed old config: $config_path"
+    backup_if_exists "$config_path"
   fi
   if [[ -f "$auth_path" ]]; then
-    rm -f "$auth_path"
-    log_info "Removed old config: $auth_path"
-  fi
-
-  local backups=()
-  shopt -s nullglob
-  backups+=( "${config_path}.bak."* )
-  backups+=( "${auth_path}.bak."* )
-  shopt -u nullglob
-  if ((${#backups[@]})); then
-    rm -f "${backups[@]}"
-    for b in "${backups[@]}"; do
-      log_info "Removed old backup: $b"
-    done
+    backup_if_exists "$auth_path"
   fi
 
   unset CRS_OAI_KEY || true
@@ -246,7 +274,7 @@ ensure_shell_path_block() {
   local block_start="# >>> codex user paths >>>"
   local block_end="# <<< codex user paths <<<"
 
-  for file in "$HOME/.zshrc" "$HOME/.bashrc"; do
+  for file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     if [[ ! -f "$file" ]]; then
       touch "$file"
     fi
@@ -300,9 +328,9 @@ install_node_user() {
   # which is fatal under `set -o pipefail`.
   lts_version="$(
     curl -fsSL https://nodejs.org/dist/index.tab |
-      awk -F'\t' '
+      awk -F'\t' -v arch="$node_arch" '
         NR==1 { next }
-        $9 != "-" && !found { v=$1; found=1 }
+        $10 != "-" && index($3, arch) > 0 && !found { v=$1; found=1 }
         END { if (found) print v; else exit 1 }
       '
   )"
@@ -314,9 +342,11 @@ install_node_user() {
   local tmp_dir
   tmp_dir="$(mktemp -d)"
   local tarball="$tmp_dir/node.tar.gz"
-  local node_url="https://nodejs.org/dist/${lts_version}/node-${lts_version}-${node_arch}.tar.gz"
+  local node_file="node-${lts_version}-${node_arch}.tar.gz"
+  local node_url="https://nodejs.org/dist/${lts_version}/${node_file}"
 
   curl -fsSL "$node_url" -o "$tarball"
+  verify_download_sha256 "$lts_version" "$node_file" "$tarball"
 
   mkdir -p "$NODE_ROOT"
   tar -xzf "$tarball" -C "$NODE_ROOT"
@@ -342,6 +372,15 @@ ensure_node_npm() {
     log_info "Node.js and npm already installed."
     log_ok "Node.js: $(node -v)"
     log_ok "npm: $(npm -v)"
+    return 0
+  fi
+
+  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && [[ -x "$NODE_ROOT/current/bin/node" ]] && [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
+    export PATH="$NODE_ROOT/current/bin:$PATH"
+    hash -r
+    log_info "Using user Node.js and npm under: $NODE_ROOT/current/bin"
+    log_ok "Node.js: $("$NODE_ROOT/current/bin/node" -v)"
+    log_ok "npm: $("$NODE_ROOT/current/bin/npm" -v)"
     return 0
   fi
 
@@ -558,6 +597,21 @@ ensure_no_system_codex() {
   log_ok "System-level Codex CLI removed."
 }
 
+warn_system_codex() {
+  find_system_codex_prefixes
+  if ((${#SYSTEM_CODEX_PREFIXES[@]} == 0)); then
+    log_info "No system-level Codex CLI detected."
+    return 0
+  fi
+
+  local prefix
+  for prefix in "${SYSTEM_CODEX_PREFIXES[@]}"; do
+    log_warn "Detected system-level Codex CLI: $prefix"
+  done
+  log_warn "Leaving system-level Codex untouched. This installer puts the user npm bin directory first in PATH."
+  log_warn "If you explicitly want to remove system-level Codex, rerun with --remove-system-codex."
+}
+
 ensure_codex() {
   local npm_bin="$NPM_PREFIX/bin"
 
@@ -601,18 +655,30 @@ upsert_env_in_file() {
   local file="$1"
   local key="$2"
   local value="$3"
-  local escaped="$value"
-  escaped="${escaped//\\/\\\\}"
-  escaped="${escaped//\"/\\\"}"
+  local quoted
+  quoted="$(shell_single_quote "$value")"
 
   if [[ ! -f "$file" ]]; then
     touch "$file"
   fi
 
   if grep -qE "^[[:space:]]*export[[:space:]]+${key}=" "$file"; then
-    perl -pi -e "s|^[[:space:]]*export[[:space:]]+${key}=.*$|export ${key}=\"${escaped}\"|" "$file"
+    local tmp
+    tmp="$(mktemp)"
+    awk -v k="$key" -v q="$quoted" '
+      BEGIN{done=0}
+      $0 ~ "^[[:space:]]*export[[:space:]]+" k "=" {
+        if (!done) {
+          print "export " k "=" q
+          done=1
+        }
+        next
+      }
+      { print }
+    ' "$file" > "$tmp"
+    mv "$tmp" "$file"
   else
-    printf '\nexport %s="%s"\n' "$key" "$value" >> "$file"
+    printf '\nexport %s=%s\n' "$key" "$quoted" >> "$file"
   fi
 }
 
@@ -700,15 +766,15 @@ configure_crs() {
   base_url_input="$(read_required 'Enter CRS base_url (must expose /responses, example: http://x.x.x.x:10086/openai): ')"
   crs_key="$(read_secret_required 'Enter CRS_OAI_KEY (hidden input): ')"
   base_url="$(resolve_crs_base_url "$base_url_input")"
+  local base_url_toml
+  base_url_toml="$(toml_escape "$base_url")"
 
   mkdir -p "$codex_dir"
   if [[ "$clean_existing" -eq 1 ]]; then
-    log_info "Detected existing node/npm/codex; cleaning old CRS configuration before regenerating..."
-    clear_existing_crs_config "$codex_dir"
-  else
-    backup_if_exists "$config_path"
-    backup_if_exists "$auth_path"
+    log_info "Detected existing node/npm/codex; backing up old CRS configuration before regenerating..."
   fi
+  backup_if_exists "$config_path"
+  backup_if_exists "$auth_path"
 
   cat > "$config_path" <<CFG
 model_provider = "crs"
@@ -717,14 +783,13 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 preferred_auth_method = "apikey"
 
-sandbox_mode = "danger-full-access"
+sandbox_mode = "workspace-write"
 approval_policy = "on-request"
-# Or more aggressive:
-# approval_policy = "never"
+# High risk: only use approval_policy = "never" if you fully understand the risk.
 
 [model_providers.crs]
 name = "crs"
-base_url = "$base_url"
+base_url = "$base_url_toml"
 wire_api = "responses"
 requires_openai_auth = false
 env_key = "CRS_OAI_KEY"
@@ -746,14 +811,14 @@ AUTH
 
   export CRS_OAI_KEY="$crs_key"
   export CODEX_HOME="$codex_dir"
-  upsert_env_in_file "$HOME/.zshrc" "CRS_OAI_KEY" "$crs_key"
-  upsert_env_in_file "$HOME/.bashrc" "CRS_OAI_KEY" "$crs_key"
-  upsert_env_in_file "$HOME/.zshrc" "CODEX_HOME" "$codex_dir"
-  upsert_env_in_file "$HOME/.bashrc" "CODEX_HOME" "$codex_dir"
+  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    upsert_env_in_file "$rc_file" "CRS_OAI_KEY" "$crs_key"
+    upsert_env_in_file "$rc_file" "CODEX_HOME" "$codex_dir"
+  done
 
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"
-  log_ok "Persisted CRS_OAI_KEY and CODEX_HOME in ~/.zshrc and ~/.bashrc"
+  log_ok "Persisted CRS_OAI_KEY and CODEX_HOME in zsh/bash profile files"
 }
 
 configure_no_proxy() {
@@ -784,9 +849,11 @@ main() {
   log_info "Starting one-click install for macOS Codex CLI package..."
   ensure_node_npm
   if [[ "$REMOVE_SYSTEM_CODEX" -eq 1 ]]; then
-    log_info "--remove-system-codex is now automatic; checking system-level Codex CLI."
+    log_info "--remove-system-codex requested; checking system-level Codex CLI."
+    ensure_no_system_codex
+  else
+    warn_system_codex
   fi
-  ensure_no_system_codex
   ensure_npm_user_prefix
   ensure_codex
 
@@ -800,7 +867,7 @@ main() {
 
   printf '\n'
   log_ok "Done."
-  log_info "If environment variables are not visible, run: source ~/.zshrc"
+  log_info "If environment variables are not visible, open a new terminal or source the updated zsh/bash profile file."
 }
 
 main "$@"

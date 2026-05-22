@@ -107,6 +107,8 @@ API Key: cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ### 步骤 1: 创建配置目录
 
+> 如果你通过一键安装脚本启用了 ASCII 安全路径，请优先使用 `CODEX_HOME` 指向的目录；未设置时再使用 `~/.codex`。
+
 ```bash
 # 创建 Codex 配置目录
 mkdir -p ~/.codex
@@ -132,10 +134,9 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 preferred_auth_method = "apikey"
 
-sandbox_mode = "danger-full-access"
+sandbox_mode = "workspace-write"
 approval_policy = "on-request"
-# Or more aggressive:
-# approval_policy = "never"
+# 高风险：仅在完全理解风险时才改为 approval_policy = "never"
 
 [model_providers.crs]
 name = "crs"

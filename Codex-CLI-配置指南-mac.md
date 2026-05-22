@@ -78,6 +78,8 @@ API Key: cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ### 步骤 1: 创建配置目录
 
+> 如果你通过一键安装脚本启用了 ASCII 安全路径，请优先使用 `CODEX_HOME` 指向的目录；未设置时再使用 `~/.codex`。
+
 ```bash
 # 创建 Codex 配置目录
 mkdir -p ~/.codex
@@ -103,10 +105,9 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 preferred_auth_method = "apikey"
 
-sandbox_mode = "danger-full-access"
+sandbox_mode = "workspace-write"
 approval_policy = "on-request"
-# Or more aggressive:
-# approval_policy = "never"
+# 高风险：仅在完全理解风险时才改为 approval_policy = "never"
 
 [model_providers.crs]
 name = "crs"
@@ -204,7 +205,7 @@ source ~/.zshrc
 echo $CRS_OAI_KEY
 ```
 
-> 如果你使用的是 bash，请改为写入 `~/.bashrc` 并执行 `source ~/.bashrc`。
+> 如果你使用的是 bash，请优先写入 `~/.bash_profile`；也可以让 `~/.bash_profile` source `~/.bashrc`。
 
 #### 方法 2: 临时设置
 
@@ -266,8 +267,8 @@ codex "写一个 Python 函数计算斐波那契数列"
 ```
 □ ~/.codex/config.toml 已创建并配置正确的 base_url
 □ ~/.codex/auth.json 已创建并设置 OPENAI_API_KEY 为 null
-□ 环境变量 CRS_OAI_KEY 已添加到 ~/.zshrc（或 ~/.bashrc）
-□ 执行 source ~/.zshrc（或 source ~/.bashrc）加载环境变量
+□ 环境变量 CRS_OAI_KEY 已添加到 ~/.zshrc / ~/.zprofile（bash 则为 ~/.bash_profile）
+□ 执行 source ~/.zshrc（bash 则 source ~/.bash_profile）加载环境变量
 □ echo $CRS_OAI_KEY 显示正确的 API Key
 □ codex "Hello" 测试成功
 ```

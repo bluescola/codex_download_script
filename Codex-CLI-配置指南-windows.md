@@ -70,7 +70,8 @@ API Key: cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 PowerShell:
 
 ```powershell
-mkdir $env:USERPROFILE\.codex -Force
+$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+New-Item -ItemType Directory -Path $codexHome -Force | Out-Null
 ```
 
 命令提示符（cmd）:
@@ -85,8 +86,9 @@ mkdir %USERPROFILE%\.codex
 
 用记事本打开（不存在会新建）：
 
-```cmd
-notepad %USERPROFILE%\.codex\config.toml
+```powershell
+$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+notepad (Join-Path $codexHome 'config.toml')
 ```
 
 粘贴以下内容（把 `base_url` 改成你的服务器地址）：
@@ -98,10 +100,9 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 preferred_auth_method = "apikey"
 
-sandbox_mode = "danger-full-access"
+sandbox_mode = "workspace-write"
 approval_policy = "on-request"
-# 或者更激进：
-# approval_policy = "never"
+# 高风险：仅在完全理解风险时才改为 approval_policy = "never"
 
 [model_providers.crs]
 name = "crs"
@@ -146,8 +147,9 @@ base_url = "http://x.x.x.x:10086/openai"
 
 用记事本打开（不存在会新建）：
 
-```cmd
-notepad %USERPROFILE%\.codex\auth.json
+```powershell
+$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+notepad (Join-Path $codexHome 'auth.json')
 ```
 
 粘贴以下内容：
@@ -168,8 +170,12 @@ notepad %USERPROFILE%\.codex\auth.json
 
 写入 **用户环境变量**（需要重开终端生效）：
 
-```cmd
-setx CRS_OAI_KEY "cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```powershell
+[Environment]::SetEnvironmentVariable(
+  "CRS_OAI_KEY",
+  "cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "User"
+)
 ```
 
 重开 PowerShell 后验证：
@@ -255,9 +261,10 @@ codex "写一个 Python 函数计算斐波那契数列"
 完成配置后，确认以下内容：
 
 ```
-□ %USERPROFILE%\.codex\config.toml 已创建并配置正确的 base_url
-□ %USERPROFILE%\.codex\auth.json 已创建并设置 OPENAI_API_KEY 为 null
-□ CRS_OAI_KEY 已写入用户环境变量（setx）或在当前会话临时设置
+□ Codex 配置目录已确认：优先使用 CODEX_HOME，未设置则使用 %USERPROFILE%\.codex
+□ config.toml 已创建并配置正确的 base_url
+□ auth.json 已创建并设置 OPENAI_API_KEY 为 null
+□ CRS_OAI_KEY 已写入用户环境变量或在当前会话临时设置
 □ 重开终端后 echo CRS_OAI_KEY 能显示正确的 API Key
 □ codex "Hello" 测试成功
 ```
@@ -323,7 +330,7 @@ model_reasoning_effort = "medium"
    ```powershell
    echo $env:CRS_OAI_KEY
    ```
-2. 若你用的是 `setx`，请确认 **重开终端** 后再试。
+2. 若你刚写入用户环境变量，请确认 **重开终端** 后再试。
 3. 仍失败请联系管理员更换 Key。
 
 ---
@@ -404,17 +411,18 @@ echo "问题" | codex
 
 完整配置需要修改三个位置：
 
-### 1. `%USERPROFILE%\.codex\config.toml`
+### 1. Codex 配置目录里的 `config.toml`
+- 优先使用 `CODEX_HOME`，未设置时使用 `%USERPROFILE%\.codex`
 - 设置 `base_url` 为 CRS 服务器地址
 - 配置 `model` 和 `model_reasoning_effort`
 - 指定 `env_key = "CRS_OAI_KEY"`
 
-### 2. `%USERPROFILE%\.codex\auth.json`
+### 2. Codex 配置目录里的 `auth.json`
 - 设置 `"OPENAI_API_KEY": null`
 
 ### 3. 用户环境变量 `CRS_OAI_KEY`
-- 推荐使用 `setx` 写入用户环境变量
-- 注意 `setx` 需要重开终端生效
+- 推荐使用 `[Environment]::SetEnvironmentVariable(..., "User")` 写入用户环境变量
+- 写入用户环境变量后需要重开终端生效
 
 ---
 

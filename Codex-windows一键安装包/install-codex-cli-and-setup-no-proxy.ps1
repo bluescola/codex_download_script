@@ -1,6 +1,7 @@
 param(
     [switch]$ForceNodeReinstall,
     [switch]$ForceCodexReinstall,
+    [switch]$RemoveSystemCodex,
     [switch]$SkipCrsConfig
 )
 
@@ -36,6 +37,7 @@ try {
     & $installScript `
         -ForceNodeReinstall:$ForceNodeReinstall `
         -ForceCodexReinstall:$ForceCodexReinstall `
+        -RemoveSystemCodex:$RemoveSystemCodex `
         -SkipCrsConfig:$SkipCrsConfig
 
     Write-Host ''
@@ -45,6 +47,7 @@ try {
     Write-Host '  - 3.27.43.117:10086'
     Write-Host '  - localhost'
     Write-Host '  - 127.0.0.1'
+    Write-Host '  - CRS host from CODEX_HOME\config.toml if present'
     & $noProxyScript
 
     Write-Host ''
