@@ -99,22 +99,22 @@ nano ~/.codex/config.toml
 粘贴以下内容：
 
 ```toml
-model_provider = "crs"
-model = "gpt-5.2"
+model_provider = "OpenAI"
+model = "gpt-5.4"
+review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
-preferred_auth_method = "apikey"
+network_access = "enabled"
 
 sandbox_mode = "workspace-write"
 approval_policy = "on-request"
 # 高风险：仅在完全理解风险时才改为 approval_policy = "never"
 
-[model_providers.crs]
-name = "crs"
-base_url = "http://x.x.x.x:10086/openai"  # 根据实际填写你服务器的 ip 地址或者域名
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "https://your-crs-host:8443"  # 根据实际填写你服务器的地址
 wire_api = "responses"
-requires_openai_auth = false
-env_key = "CRS_OAI_KEY"
+requires_openai_auth = true
 
 [features]
 tui_app_server = false
@@ -130,11 +130,11 @@ apps = false
 示例（假设服务器是 x.x.x.x:10086）：
 
 ```toml
-base_url = "http://x.x.x.x:10086/openai"
+base_url = "https://your-crs-host:8443"
 ```
 
 **模型说明**：
-- 默认使用 `gpt-5.2`（如管理员提供其他模型名，也可以直接替换 `model = "..."`）
+- 默认使用 `gpt-5.4`（如管理员提供其他模型名，也可以直接替换 `model = "..."`）
 
 **推理深度**：
 - `low`: 快速响应
@@ -148,7 +148,7 @@ base_url = "http://x.x.x.x:10086/openai"
 
 ### 步骤 3: 配置 auth.json
 
-在 `~/.codex/auth.json` 文件中配置 API 密钥为 `null`：
+在 `~/.codex/auth.json` 文件中直接写入 API 密钥：
 
 ```bash
 # 创建或编辑认证文件
@@ -159,63 +159,23 @@ nano ~/.codex/auth.json
 
 ```json
 {
-    "OPENAI_API_KEY": null
+    "OPENAI_API_KEY": "sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 }
 ```
 
-**说明**：设置为 `null` 表示不使用 OpenAI 官方 API，而是通过 CRS 服务器中转。
+**说明**：这里填写的是当前 CRS 2.0 / OpenAI-compatible 入口使用的 token。
 
 保存并退出。
 
 ---
 
-### 步骤 4: 设置环境变量
+### 步骤 4: 可选设置 CODEX_HOME
 
-#### 方法 1: 永久设置（推荐）
-
-macOS 默认 shell 通常为 zsh，推荐写入 `~/.zshrc`：
+如果安装脚本因为中文路径兼容问题启用了 ASCII 安全目录，你可能还需要保留 `CODEX_HOME`：
 
 ```bash
-# 编辑 zshrc
-nano ~/.zshrc
+export CODEX_HOME="/Users/Shared/Codex-$(id -u)/.codex"
 ```
-
-在文件**末尾**添加：
-
-```bash
-# CRS API Key for Codex CLI
-export CRS_OAI_KEY="后台创建的API密钥"
-```
-
-**⚠️ 重要**：将 `后台创建的API密钥` 替换为管理员提供的实际 API Key。
-
-示例：
-
-```bash
-export CRS_OAI_KEY="cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-```
-
-保存并退出，然后加载环境变量：
-
-```bash
-# 立即应用配置
-source ~/.zshrc
-
-# 验证环境变量
-echo $CRS_OAI_KEY
-```
-
-> 如果你使用的是 bash，请优先写入 `~/.bash_profile`；也可以让 `~/.bash_profile` source `~/.bashrc`。
-
-#### 方法 2: 临时设置
-
-如果只想临时使用，可以直接在终端执行：
-
-```bash
-export CRS_OAI_KEY="cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-```
-
-**注意**：此方法仅在当前终端会话有效，关闭终端后失效。
 
 ---
 

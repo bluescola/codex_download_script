@@ -1622,10 +1622,10 @@ function Configure-CrsFiles {
     $codexDir = $script:CodexHome
 
     Write-Info 'Starting CRS configuration...'
-    Write-Info 'Please provide values for base_url and CRS_OAI_KEY.'
+    Write-Info 'Please provide values for base_url and OPENAI_API_KEY.'
 
     $baseUrlInput = Read-RequiredInput 'Enter CRS base_url (must expose /responses, example: http://x.x.x.x:10086/openai)'
-    $crsKey = Read-SecretInput 'Enter CRS_OAI_KEY (input hidden)'
+    $openAiKey = Read-SecretInput 'Enter OPENAI_API_KEY / CRS 2.0 token (input hidden)'
     $baseUrl = Resolve-CrsBaseUrl $baseUrlInput
 
     if ($script:UseAsciiSafePaths) {
@@ -1634,22 +1634,22 @@ function Configure-CrsFiles {
     }
 
     $configToml = @"
-model_provider = "crs"
-model = "gpt-5.2"
+model_provider = "OpenAI"
+model = "gpt-5.4"
+review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
-preferred_auth_method = "apikey"
+network_access = "enabled"
 
 sandbox_mode = "workspace-write"
 approval_policy = "on-request"
 # 高风险：仅在完全理解风险时才改为 approval_policy = "never"
 
-[model_providers.crs]
-name = "crs"
+[model_providers.OpenAI]
+name = "OpenAI"
 base_url = "$baseUrl"
 wire_api = "responses"
-requires_openai_auth = false
-env_key = "CRS_OAI_KEY"
+requires_openai_auth = true
 
 [features]
 # 实际已去除
@@ -1662,11 +1662,9 @@ apps = false
 "gpt-5.2" = "gpt-5.4"
 "@
 
-    $authJson = @"
-{
-  "OPENAI_API_KEY": null
-}
-"@
+    $authJson = (@{
+        OPENAI_API_KEY = $openAiKey
+    } | ConvertTo-Json -Depth 3)
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     if ($CleanExistingConfig) {
@@ -1680,10 +1678,15 @@ apps = false
         -Encoding $utf8NoBom `
         -CleanExistingConfig:$CleanExistingConfig
 
-    [Environment]::SetEnvironmentVariable('CRS_OAI_KEY', $crsKey, 'User')
-    $env:CRS_OAI_KEY = $crsKey
+    try {
+        [Environment]::SetEnvironmentVariable('CRS_OAI_KEY', $null, 'User')
+    }
+    catch {
+        Write-WarnMsg "Failed to clear legacy CRS_OAI_KEY from USER environment variables: $($_.Exception.Message)"
+    }
+    Remove-Item Env:CRS_OAI_KEY -ErrorAction SilentlyContinue
 
-    Write-Ok 'Saved CRS_OAI_KEY to USER environment variables.'
+    Write-Ok 'Saved OPENAI_API_KEY to auth.json.'
 }
 
 if (-not [string]::IsNullOrWhiteSpace($UninstallSystemCodexPrefix)) {

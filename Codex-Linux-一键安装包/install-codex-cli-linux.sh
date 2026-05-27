@@ -717,6 +717,51 @@ upsert_env_in_file() {
   mv "$tmp" "$file"
 }
 
+remove_env_from_file() {
+  local file="$1"
+  local key="$2"
+  local expected_value="${3:-}"
+  local expected_quoted=""
+
+  if [[ ! -f "$file" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$expected_value" ]]; then
+    expected_quoted="$(shell_single_quote "$expected_value")"
+  fi
+
+  if grep -qE "^[[:space:]]*export[[:space:]]+${key}=" "$file"; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v k="$key" -v expected="$expected_value" -v expected_quoted="$expected_quoted" '
+      $0 ~ "^[[:space:]]*export[[:space:]]+" k "=" {
+        rhs = $0
+        sub("^[[:space:]]*export[[:space:]]+" k "=", "", rhs)
+        sub("^[[:space:]]*", "", rhs)
+        if (expected == "" ||
+            rhs == expected ||
+            rhs == expected_quoted ||
+            rhs == "\"" expected "\"") {
+          next
+        }
+      }
+      { print }
+    ' "$file" > "$tmp"
+    mv "$tmp" "$file"
+  fi
+}
+
+escape_json_string() {
+  local value="${1:-}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
 probe_crs_responses_route() {
   local base_url="$1"
   local probe_url status
@@ -792,17 +837,16 @@ resolve_crs_base_url() {
 
 configure_crs() {
   local clean_existing="${1:-0}"
-  local codex_dir config_path auth_path base_url_input base_url crs_key
+  local codex_dir config_path auth_path base_url_input base_url openai_key escaped_openai_key
   codex_dir="$CODEX_HOME_DIR"
   config_path="$codex_dir/config.toml"
   auth_path="$codex_dir/auth.json"
 
   log_info "Starting CRS configuration..."
   base_url_input="$(read_required 'Enter CRS base_url (must expose /responses, example: http://x.x.x.x:10086/openai): ')"
-  crs_key="$(read_secret_required 'Enter CRS_OAI_KEY (hidden input): ')"
+  openai_key="$(read_secret_required 'Enter OPENAI_API_KEY / CRS 2.0 token (hidden input): ')"
   base_url="$(resolve_crs_base_url "$base_url_input")"
-  local base_url_toml
-  base_url_toml="$(toml_escape "$base_url")"
+  escaped_openai_key="$(escape_json_string "$openai_key")"
 
   mkdir -p "$codex_dir"
   if [[ "$clean_existing" -eq 1 ]]; then
@@ -812,22 +856,22 @@ configure_crs() {
   backup_if_exists "$auth_path"
 
   cat > "$config_path" <<CFG
-model_provider = "crs"
-model = "gpt-5.2"
+model_provider = "OpenAI"
+model = "gpt-5.4"
+review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
-preferred_auth_method = "apikey"
+network_access = "enabled"
 
 sandbox_mode = "workspace-write"
 approval_policy = "on-request"
 # High risk: only use approval_policy = "never" if you fully understand the risk.
 
-[model_providers.crs]
-name = "crs"
-base_url = "$base_url_toml"
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "$base_url"
 wire_api = "responses"
-requires_openai_auth = false
-env_key = "CRS_OAI_KEY"
+requires_openai_auth = true
 
 [features]
 tui_app_server = false
@@ -838,24 +882,20 @@ apps = false
 "gpt-5.2" = "gpt-5.4"
 CFG
 
-  cat > "$auth_path" <<'AUTH'
-{
-  "OPENAI_API_KEY": null
-}
-AUTH
+  printf '{\n  "OPENAI_API_KEY": "%s"\n}\n' "$escaped_openai_key" > "$auth_path"
 
-  export CRS_OAI_KEY="$crs_key"
   export CODEX_HOME="$codex_dir"
 
   # Persist in common shells.
-  upsert_env_in_file "$HOME/.bashrc" "CRS_OAI_KEY" "$crs_key"
-  upsert_env_in_file "$HOME/.zshrc" "CRS_OAI_KEY" "$crs_key"
   upsert_env_in_file "$HOME/.bashrc" "CODEX_HOME" "$codex_dir"
   upsert_env_in_file "$HOME/.zshrc" "CODEX_HOME" "$codex_dir"
+  remove_env_from_file "$HOME/.bashrc" "CRS_OAI_KEY"
+  remove_env_from_file "$HOME/.zshrc" "CRS_OAI_KEY"
+  unset CRS_OAI_KEY || true
 
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"
-  log_ok "Persisted CRS_OAI_KEY and CODEX_HOME in ~/.bashrc and ~/.zshrc"
+  log_ok "Persisted CODEX_HOME and auth.json for CRS 2.0 / OpenAI-compatible mode"
 }
 
 configure_no_proxy() {

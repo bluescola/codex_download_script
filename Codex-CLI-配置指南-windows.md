@@ -94,22 +94,22 @@ notepad (Join-Path $codexHome 'config.toml')
 粘贴以下内容（把 `base_url` 改成你的服务器地址）：
 
 ```toml
-model_provider = "crs"
-model = "gpt-5.2"
+model_provider = "OpenAI"
+model = "gpt-5.4"
+review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
-preferred_auth_method = "apikey"
+network_access = "enabled"
 
 sandbox_mode = "workspace-write"
 approval_policy = "on-request"
 # 高风险：仅在完全理解风险时才改为 approval_policy = "never"
 
-[model_providers.crs]
-name = "crs"
-base_url = "http://x.x.x.x:10086/openai"
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "https://your-crs-host:8443"
 wire_api = "responses"
-requires_openai_auth = false
-env_key = "CRS_OAI_KEY"
+requires_openai_auth = true
 
 [features]
 # 实际已去除
@@ -127,11 +127,11 @@ apps = false
 示例（假设服务器是 x.x.x.x:10086）：
 
 ```toml
-base_url = "http://x.x.x.x:10086/openai"
+base_url = "https://your-crs-host:8443"
 ```
 
 **模型说明**：
-- 默认使用 `gpt-5.2`（如管理员提供其他模型名，也可以直接替换 `model = "..."`）
+- 默认使用 `gpt-5.4`（如管理员提供其他模型名，也可以直接替换 `model = "..."`）
 
 **推理深度**：
 - `low`: 快速响应
@@ -156,48 +156,20 @@ notepad (Join-Path $codexHome 'auth.json')
 
 ```json
 {
-  "OPENAI_API_KEY": null
+  "OPENAI_API_KEY": "sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 }
 ```
 
-**说明**：设置为 `null` 表示不使用 OpenAI 官方 API，而是通过 CRS 服务器中转。
+**说明**：这里填写的是当前 CRS 2.0 / OpenAI-compatible 入口使用的 token。
 
 ---
 
-### 步骤 4: 设置环境变量
+### 步骤 4: 可选设置 CODEX_HOME
 
-#### 方法 1: 永久设置（推荐）
-
-写入 **用户环境变量**（需要重开终端生效）：
+如果安装脚本因为中文路径兼容问题启用了 ASCII 安全目录，你可能还需要保留 `CODEX_HOME`：
 
 ```powershell
-[Environment]::SetEnvironmentVariable(
-  "CRS_OAI_KEY",
-  "cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "User"
-)
-```
-
-重开 PowerShell 后验证：
-
-```powershell
-echo $env:CRS_OAI_KEY
-```
-
-#### 方法 2: 临时设置
-
-只在当前终端会话有效：
-
-PowerShell:
-
-```powershell
-$env:CRS_OAI_KEY="cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-```
-
-命令提示符（cmd）:
-
-```cmd
-set CRS_OAI_KEY=cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+[Environment]::SetEnvironmentVariable('CODEX_HOME', 'C:\Users\Public\Codex\.codex', 'User')
 ```
 
 ---
