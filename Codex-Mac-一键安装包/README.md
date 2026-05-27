@@ -17,7 +17,8 @@ bash install-codex-cli-mac.sh
 - 安装 `@openai/codex` 到用户 npm prefix。
 - 写入 Codex CRS 配置，默认 `sandbox_mode = "workspace-write"`。
 - 写入前会备份已有 `config.toml` 和 `auth.json`，不会删除历史备份。
-- 持久化 `CRS_OAI_KEY` 和 `CODEX_HOME` 到 zsh/bash 常见 profile 文件（包括 `~/.zshrc`、`~/.zprofile`、`~/.bash_profile`、`~/.bashrc`）。
+- 持久化 `CRS_OAI_KEY` 到 zsh/bash 常见 profile 文件（包括 `~/.zshrc`、`~/.zprofile`、`~/.bash_profile`、`~/.bashrc`）；只有启用 ASCII 安全路径等非默认 Codex 目录时才持久化 `CODEX_HOME`。
+- 只把用户 npm bin 目录写入 profile 的 `PATH` 代码块；npm prefix/cache 通过 npm 配置文件管理，不再长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`。
 - 配置 `NO_PROXY/no_proxy`，会尝试从 `CODEX_HOME` 或 `~/.codex/config.toml` 读取 CRS `base_url` 并加入实际 host/host:port。
 
 ## 系统级 Codex

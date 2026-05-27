@@ -239,13 +239,18 @@ if [[ "$USE_ASCII_SAFE_PATHS" -eq 1 ]]; then
 else
   CODEX_UNIX_ROOT=""
   NODE_ROOT="$HOME/.local/node"
-  NPM_PREFIX="$HOME/.npm-global"
+  NPM_PREFIX="$HOME/.local"
   NPM_CACHE="$HOME/.npm-cache"
   CODEX_HOME_DIR="$HOME/.codex"
 fi
 
+is_default_codex_home() {
+  [[ "$CODEX_HOME_DIR" == "$HOME/.codex" ]]
+}
+
 initialize_ascii_safe_environment() {
   if [[ "$USE_ASCII_SAFE_PATHS" -eq 0 ]]; then
+    unset NPM_CONFIG_PREFIX NPM_CONFIG_CACHE CODEX_HOME
     return 0
   fi
 
@@ -265,11 +270,10 @@ ensure_shell_path_block() {
     node_bin="$NODE_ROOT/current/bin"
   fi
 
-  local path_line="export NPM_CONFIG_PREFIX=\"$NPM_PREFIX\"; export NPM_CONFIG_CACHE=\"$NPM_CACHE\"; export CODEX_HOME=\"$CODEX_HOME_DIR\"; export PATH=\"$npm_bin"
+  local path_line='if [[ ":$PATH:" != *":'"$npm_bin"':"* ]]; then export PATH="'"$npm_bin"':$PATH"; fi'
   if [[ -n "$node_bin" ]]; then
-    path_line="$path_line:$node_bin"
+    path_line="$path_line"$'\n''if [[ ":$PATH:" != *":'"$node_bin"':"* ]]; then export PATH="'"$node_bin"':$PATH"; fi'
   fi
-  path_line="$path_line:\$PATH\""
 
   local block_start="# >>> codex user paths >>>"
   local block_end="# <<< codex user paths <<<"
@@ -395,9 +399,11 @@ ensure_node_npm() {
 ensure_npm_user_prefix() {
   mkdir -p "$NPM_PREFIX"
   mkdir -p "$NPM_CACHE"
-  export NPM_CONFIG_PREFIX="$NPM_PREFIX"
-  export NPM_CONFIG_CACHE="$NPM_CACHE"
-  export CODEX_HOME="$CODEX_HOME_DIR"
+  if [[ "$USE_ASCII_SAFE_PATHS" -eq 1 ]]; then
+    export NPM_CONFIG_PREFIX="$NPM_PREFIX"
+    export NPM_CONFIG_CACHE="$NPM_CACHE"
+    export CODEX_HOME="$CODEX_HOME_DIR"
+  fi
   npm config set prefix "$NPM_PREFIX" >/dev/null
   npm config set cache "$NPM_CACHE" >/dev/null
   export PATH="$NPM_PREFIX/bin:$PATH"
@@ -682,6 +688,63 @@ upsert_env_in_file() {
   fi
 }
 
+remove_env_from_file() {
+  local file="$1"
+  local key="$2"
+  local expected_value="${3:-}"
+  local expected_quoted=""
+
+  if [[ ! -f "$file" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$expected_value" ]]; then
+    expected_quoted="$(shell_single_quote "$expected_value")"
+  fi
+
+  if grep -qE "^[[:space:]]*export[[:space:]]+${key}=" "$file"; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v k="$key" -v expected="$expected_value" -v expected_quoted="$expected_quoted" '
+      $0 ~ "^[[:space:]]*export[[:space:]]+" k "=" {
+        rhs = $0
+        sub("^[[:space:]]*export[[:space:]]+" k "=", "", rhs)
+        sub("^[[:space:]]*", "", rhs)
+        if (expected == "" ||
+            rhs == expected ||
+            rhs == expected_quoted ||
+            rhs == "\"" expected "\"") {
+          next
+        }
+      }
+      { print }
+    ' "$file" > "$tmp"
+    mv "$tmp" "$file"
+  fi
+}
+
+cleanup_obsolete_profile_env() {
+  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    remove_env_from_file "$rc_file" "NPM_CONFIG_PREFIX"
+    remove_env_from_file "$rc_file" "NPM_CONFIG_CACHE"
+    if is_default_codex_home; then
+      remove_env_from_file "$rc_file" "CODEX_HOME" "$HOME/.codex"
+    fi
+  done
+}
+
+ensure_codex_home_profile_env() {
+  if is_default_codex_home; then
+    return 0
+  fi
+
+  export CODEX_HOME="$CODEX_HOME_DIR"
+  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    upsert_env_in_file "$rc_file" "CODEX_HOME" "$CODEX_HOME_DIR"
+  done
+  log_ok "Persisted CODEX_HOME in zsh/bash profile files: $CODEX_HOME_DIR"
+}
+
 probe_crs_responses_route() {
   local base_url="$1"
   local probe_url status
@@ -810,15 +873,13 @@ CFG
 AUTH
 
   export CRS_OAI_KEY="$crs_key"
-  export CODEX_HOME="$codex_dir"
   for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     upsert_env_in_file "$rc_file" "CRS_OAI_KEY" "$crs_key"
-    upsert_env_in_file "$rc_file" "CODEX_HOME" "$codex_dir"
   done
 
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"
-  log_ok "Persisted CRS_OAI_KEY and CODEX_HOME in zsh/bash profile files"
+  log_ok "Persisted CRS_OAI_KEY in zsh/bash profile files"
 }
 
 configure_no_proxy() {
@@ -855,6 +916,8 @@ main() {
     warn_system_codex
   fi
   ensure_npm_user_prefix
+  cleanup_obsolete_profile_env
+  ensure_codex_home_profile_env
   ensure_codex
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
