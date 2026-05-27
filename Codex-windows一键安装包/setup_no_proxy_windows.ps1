@@ -1,5 +1,6 @@
 # Codex NO_PROXY bypass setup (Windows)
-# - Adds 3.27.43.117, 3.27.43.117:10086, localhost, and 127.0.0.1 to NO_PROXY at User scope.
+# - Reads base_url from CODEX_HOME\config.toml or %USERPROFILE%\.codex\config.toml.
+# - Adds CRS host, host:port, localhost, and 127.0.0.1 to NO_PROXY at User scope.
 # - Idempotent: safe to run multiple times.
 # - Persists across reboot for the current Windows user.
 
@@ -12,8 +13,6 @@ function Write-Log([string]$Message) {
 }
 
 $Required = @(
-  "3.27.43.117",
-  "3.27.43.117:10086",
   "localhost",
   "127.0.0.1"
 )

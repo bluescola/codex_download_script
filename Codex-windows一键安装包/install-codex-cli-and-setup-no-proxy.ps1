@@ -42,13 +42,10 @@ try {
 
     Write-Host ''
     Write-Info 'Step 2/2: Configure NO_PROXY bypass (User scope)...'
-    Write-Info 'NO_PROXY will include (added if missing):'
-    Write-Host '  - 3.27.43.117'
-    Write-Host '  - 3.27.43.117:10086'
-    Write-Host '  - localhost'
-    Write-Host '  - 127.0.0.1'
-    Write-Host '  - CRS host from CODEX_HOME\config.toml if present'
-    & $noProxyScript
+    Write-Info 'NO_PROXY will be derived from config.toml base_url, plus localhost / 127.0.0.1.'
+    $codexHome = if ([string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { Join-Path $HOME '.codex' } else { $env:CODEX_HOME }
+    $configPath = Join-Path $codexHome 'config.toml'
+    & $noProxyScript -ConfigPath $configPath
 
     Write-Host ''
     Write-Ok 'Done. Restart apps (VS Code/Codex/terminals) to pick up updated NO_PROXY.'

@@ -2,15 +2,16 @@
 set -euo pipefail
 
 # Codex NO_PROXY bypass setup (Linux)
-# - Adds 3.27.43.117, 3.27.43.117:10086, localhost, and 127.0.0.1 to NO_PROXY/no_proxy.
-# - Persists across reboot by updating shell profiles, and (when available) systemd user environment.d.
+# - Reads base_url from CODEX_HOME/config.toml or ~/.codex/config.toml.
+# - Adds CRS host, host:port, localhost, and 127.0.0.1 to NO_PROXY/no_proxy.
+# - Persists across reboot by updating shell profiles and environment.d.
 # - Idempotent: safe to run multiple times.
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
-required=("3.27.43.117" "3.27.43.117:10086" "localhost" "127.0.0.1")
+required=("localhost" "127.0.0.1")
 
 append_crs_base_url_items() {
   local config_path="${CODEX_HOME:-$HOME/.codex}/config.toml"

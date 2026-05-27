@@ -3,12 +3,8 @@ setlocal
 
 title Codex NO_PROXY Bypass Setup (Windows)
 echo.
-echo [Codex] This script will add the following entries to NO_PROXY (User scope):
-echo   - 3.27.43.117
-echo   - 3.27.43.117:10086
-echo   - localhost
-echo   - 127.0.0.1
-echo   - CRS host from CODEX_HOME\config.toml if present
+echo [Codex] This script will derive NO_PROXY from .codex\config.toml base_url,
+echo [Codex] and append localhost / 127.0.0.1 plus the matching host and host:port.
 echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup_no_proxy_windows.ps1"
