@@ -114,7 +114,7 @@ requires_openai_auth = true
 [features]
 # 实际已去除
 tui_app_server = false
-# 关闭 MCP / 工具 / 列表 / 发现/建议（可避免 codex_apps 相关报错）
+# 关闭MCP和 工具 / 列表 / 发现/建议
 apps = false
 
 [notice.model_migrations]
