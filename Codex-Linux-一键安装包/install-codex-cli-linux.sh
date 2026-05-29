@@ -801,6 +801,27 @@ CFG
   log_ok "Persisted CODEX_HOME and auth.json for CRS 2.0 / OpenAI-compatible mode"
 }
 
+cleanup_legacy_path_block() {
+  # Remove stale # >>> codex user paths >>> blocks
+  # written by previous versions of this installer (pre-nvm era).
+  local block_start="# >>> codex user paths >>>"
+  local block_end="# <<< codex user paths <<<"
+
+  for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    if [[ -f "$rc_file" ]] && grep -qF "$block_start" "$rc_file" 2>/dev/null; then
+      log_info "Removing legacy path block from: $rc_file"
+      local tmp
+      tmp="$(mktemp)"
+      awk -v start="$block_start" -v end="$block_end" '
+        index($0, start) { inblock=1; next }
+        index($0, end)   { inblock=0; next }
+        !inblock { print }
+      ' "$rc_file" > "$tmp"
+      mv "$tmp" "$rc_file"
+    fi
+  done
+}
+
 configure_no_proxy() {
   local script_dir no_proxy_script
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -835,6 +856,13 @@ main() {
     warn_system_codex
   fi
   ensure_codex
+
+  # Clean up legacy path blocks and env vars from pre-nvm installer versions.
+  cleanup_legacy_path_block
+  remove_env_from_file "$HOME/.bashrc" "NPM_CONFIG_PREFIX"
+  remove_env_from_file "$HOME/.bashrc" "NPM_CONFIG_CACHE"
+  remove_env_from_file "$HOME/.zshrc" "NPM_CONFIG_PREFIX"
+  remove_env_from_file "$HOME/.zshrc" "NPM_CONFIG_CACHE"
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
     configure_crs "$clean_existing_config"
