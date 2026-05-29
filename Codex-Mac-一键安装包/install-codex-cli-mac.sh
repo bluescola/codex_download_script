@@ -263,109 +263,37 @@ initialize_ascii_safe_environment() {
   export CODEX_HOME="$CODEX_HOME_DIR"
 }
 
-ensure_shell_path_block() {
-  local npm_bin="$NPM_PREFIX/bin"
-  local node_bin=""
-  if [[ -d "$NODE_ROOT/current/bin" ]]; then
-    node_bin="$NODE_ROOT/current/bin"
-  fi
+install_brew_and_node() {
+  log_info "Installing Node.js via Homebrew (user-space, no sudo)..."
 
-  local path_line='if [[ ":$PATH:" != *":'"$npm_bin"':"* ]]; then export PATH="'"$npm_bin"':$PATH"; fi'
-  if [[ -n "$node_bin" ]]; then
-    path_line="$path_line"$'\n''if [[ ":$PATH:" != *":'"$node_bin"':"* ]]; then export PATH="'"$node_bin"':$PATH"; fi'
-  fi
-
-  local block_start="# >>> codex user paths >>>"
-  local block_end="# <<< codex user paths <<<"
-
-  for file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
-    if [[ ! -f "$file" ]]; then
-      touch "$file"
-    fi
-
-    if grep -F "$block_start" "$file" >/dev/null 2>&1; then
-      local tmp
-      tmp="$(mktemp)"
-      awk -v start="$block_start" -v end="$block_end" -v line="$path_line" '
-        index($0, start) {
-          print start
-          print line
-          print end
-          inblock=1
-          if (index($0, end)) inblock=0
-          next
-        }
-        index($0, end) { inblock=0; next }
-        !inblock { print }
-      ' "$file" > "$tmp"
-      mv "$tmp" "$file"
-    else
-      printf '\n%s\n%s\n%s\n' "$block_start" "$path_line" "$block_end" >> "$file"
-    fi
-  done
-}
-
-install_node_user() {
-  log_info "Installing Node.js LTS to user directory (no sudo)..."
-
-  if ! cmd_exists curl; then
-    echo "[ERROR] curl is required but not found." >&2
-    exit 1
-  fi
-
-  local arch
-  arch="$(uname -m)"
-  local node_arch=''
-  case "$arch" in
-    arm64) node_arch='darwin-arm64' ;;
-    x86_64) node_arch='darwin-x64' ;;
-    *)
-      echo "[ERROR] Unsupported CPU architecture: $arch" >&2
+  # Install Homebrew if not present
+  if ! cmd_exists brew; then
+    log_info "Installing Homebrew..."
+    if ! cmd_exists curl; then
+      echo "[ERROR] curl is required to install Homebrew." >&2
       exit 1
-      ;;
-  esac
+    fi
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
 
-  local lts_version
-  # NOTE: Do not exit early in the consumer (awk) when piping from curl.
-  # Exiting early closes the pipe, curl then errors with:
-  #   curl: (23) Failure writing output to destination
-  # which is fatal under `set -o pipefail`.
-  lts_version="$(
-    curl -fsSL https://nodejs.org/dist/index.tab |
-      awk -F'\t' -v arch="$node_arch" '
-        NR==1 { next }
-        $10 != "-" && index($3, arch) > 0 && !found { v=$1; found=1 }
-        END { if (found) print v; else exit 1 }
-      '
-  )"
-  if [[ -z "$lts_version" ]]; then
-    echo "[ERROR] Failed to resolve Node.js LTS version." >&2
-    exit 1
+    # Add Homebrew to PATH for current session
+    if [[ -x /opt/homebrew/bin/brew ]]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [[ -x /usr/local/bin/brew ]]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
+
+    if ! cmd_exists brew; then
+      echo "[ERROR] Homebrew installation failed." >&2
+      exit 1
+    fi
+    log_ok "Homebrew installed."
+  else
+    log_info "Homebrew already installed."
   fi
 
-  local tmp_dir
-  tmp_dir="$(mktemp -d)"
-  local tarball="$tmp_dir/node.tar.gz"
-  local node_file="node-${lts_version}-${node_arch}.tar.gz"
-  local node_url="https://nodejs.org/dist/${lts_version}/${node_file}"
-
-  curl -fsSL "$node_url" -o "$tarball"
-  verify_download_sha256 "$lts_version" "$node_file" "$tarball"
-
-  mkdir -p "$NODE_ROOT"
-  tar -xzf "$tarball" -C "$NODE_ROOT"
-
-  local extracted_dir="$NODE_ROOT/node-${lts_version}-${node_arch}"
-  local target_dir="$NODE_ROOT/$lts_version"
-
-  if [[ -d "$target_dir" ]]; then
-    rm -rf "$target_dir"
-  fi
-  mv "$extracted_dir" "$target_dir"
-  ln -sfn "$target_dir" "$NODE_ROOT/current"
-
-  export PATH="$NODE_ROOT/current/bin:$PATH"
-  hash -r
+  # Install Node via Homebrew
+  log_info "Installing Node.js LTS via Homebrew..."
+  brew install node
 
   log_ok "Node.js: $(node -v)"
   log_ok "npm: $(npm -v)"
@@ -379,37 +307,7 @@ ensure_node_npm() {
     return 0
   fi
 
-  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && [[ -x "$NODE_ROOT/current/bin/node" ]] && [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
-    export PATH="$NODE_ROOT/current/bin:$PATH"
-    hash -r
-    log_info "Using user Node.js and npm under: $NODE_ROOT/current/bin"
-    log_ok "Node.js: $("$NODE_ROOT/current/bin/node" -v)"
-    log_ok "npm: $("$NODE_ROOT/current/bin/npm" -v)"
-    return 0
-  fi
-
-  if [[ "$FORCE_NODE_REINSTALL" -eq 1 && -d "$NODE_ROOT" ]]; then
-    log_info "Removing previous user Node.js install at $NODE_ROOT"
-    rm -rf "$NODE_ROOT"
-  fi
-
-  install_node_user
-}
-
-ensure_npm_user_prefix() {
-  mkdir -p "$NPM_PREFIX"
-  mkdir -p "$NPM_CACHE"
-  if [[ "$USE_ASCII_SAFE_PATHS" -eq 1 ]]; then
-    export NPM_CONFIG_PREFIX="$NPM_PREFIX"
-    export NPM_CONFIG_CACHE="$NPM_CACHE"
-    export CODEX_HOME="$CODEX_HOME_DIR"
-  fi
-  npm config set prefix "$NPM_PREFIX" >/dev/null
-  npm config set cache "$NPM_CACHE" >/dev/null
-  export PATH="$NPM_PREFIX/bin:$PATH"
-  ensure_shell_path_block
-  log_ok "npm global prefix: $(npm config get prefix)"
-  log_ok "npm cache: $(npm config get cache)"
+  install_brew_and_node
 }
 
 trim_trailing_slash() {
@@ -957,8 +855,6 @@ main() {
   else
     warn_system_codex
   fi
-  ensure_npm_user_prefix
-  cleanup_obsolete_profile_env
   ensure_codex_home_profile_env
   ensure_codex
 
