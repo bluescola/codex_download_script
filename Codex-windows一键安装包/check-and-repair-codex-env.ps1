@@ -171,10 +171,6 @@ function Try-GetNpmPrefix {
 function Resolve-CodexBinDir {
     $candidates = New-Object System.Collections.Generic.List[string]
 
-    if (-not [string]::IsNullOrWhiteSpace($env:NPM_CONFIG_PREFIX)) {
-        [void]$candidates.Add($env:NPM_CONFIG_PREFIX)
-    }
-
     if (-not [string]::IsNullOrWhiteSpace($script:CodexAsciiNpmPrefix)) {
         [void]$candidates.Add($script:CodexAsciiNpmPrefix)
     }

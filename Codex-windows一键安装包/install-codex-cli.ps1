@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$ForceNodeReinstall,
     [switch]$ForceCodexReinstall,
     [switch]$SkipCrsConfig,
@@ -22,8 +22,6 @@ function Resolve-AsciiSafeRoot {
     $candidates = New-Object System.Collections.Generic.List[string]
     foreach ($candidate in @(
         $env:CODEX_WINDOWS_ASCII_ROOT,
-        $(if (-not [string]::IsNullOrWhiteSpace($env:PUBLIC)) { Join-Path $env:PUBLIC 'Codex' }),
-        $(if (-not [string]::IsNullOrWhiteSpace($env:ProgramData)) { Join-Path $env:ProgramData 'Codex' }),
         'C:\Codex'
     )) {
         if (-not [string]::IsNullOrWhiteSpace($candidate)) {
@@ -64,11 +62,6 @@ function Initialize-CodexPathSettings {
     } else {
         Join-Path $env:LOCALAPPDATA 'npm-cache'
     }
-    $script:CodexNpmUserConfig = if ($script:UseAsciiSafePaths) {
-        Join-Path $script:CodexAsciiRoot 'npmrc'
-    } else {
-        $null
-    }
     $script:CodexTempRoot = if ($script:UseAsciiSafePaths) {
         Join-Path $script:CodexAsciiRoot 'temp'
     } else {
@@ -94,7 +87,6 @@ function Ensure-CodexPathSettings {
         'CodexAsciiRoot',
         'CodexNpmPrefix',
         'CodexNpmCache',
-        'CodexNpmUserConfig',
         'CodexTempRoot',
         'CodexHome',
         'UserNodeRoot'
@@ -124,14 +116,6 @@ function Write-Ok([string]$Message) {
     Write-Host "[OK] $Message" -ForegroundColor Green
 }
 
-function ConvertTo-NpmConfigPath([string]$PathValue) {
-    if ([string]::IsNullOrWhiteSpace($PathValue)) {
-        return ''
-    }
-
-    return $PathValue.Replace('\', '/')
-}
-
 function Initialize-AsciiSafeEnvironment {
     Ensure-CodexPathSettings
 
@@ -155,24 +139,21 @@ function Initialize-AsciiSafeEnvironment {
         }
     }
 
-    $env:NPM_CONFIG_PREFIX = $script:CodexNpmPrefix
-    $env:NPM_CONFIG_CACHE = $script:CodexNpmCache
-    $env:CODEX_HOME = $script:CodexHome
-    [Environment]::SetEnvironmentVariable('NPM_CONFIG_PREFIX', $script:CodexNpmPrefix, 'User')
-    [Environment]::SetEnvironmentVariable('NPM_CONFIG_CACHE', $script:CodexNpmCache, 'User')
-    [Environment]::SetEnvironmentVariable('CODEX_HOME', $script:CodexHome, 'User')
-
-    if (-not [string]::IsNullOrWhiteSpace($script:CodexNpmUserConfig)) {
-        $env:NPM_CONFIG_USERCONFIG = $script:CodexNpmUserConfig
-        [Environment]::SetEnvironmentVariable('NPM_CONFIG_USERCONFIG', $script:CodexNpmUserConfig, 'User')
-
-        $npmrc = @(
-            "prefix=$(ConvertTo-NpmConfigPath $script:CodexNpmPrefix)",
-            "cache=$(ConvertTo-NpmConfigPath $script:CodexNpmCache)"
-        ) -join [Environment]::NewLine
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($script:CodexNpmUserConfig, $npmrc + [Environment]::NewLine, $utf8NoBom)
+    # Lock ASCII-safe root directory to current user only.
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    try {
+        $aclArgs = @(
+            $script:CodexAsciiRoot, '/inheritance:r', '/grant:r',
+            "${currentUser}:(OI)(CI)F", '/Q'
+        )
+        & icacls @aclArgs 2>$null
+        Write-Info "Secured ASCII-safe root to current user: $currentUser"
+    } catch {
+        Write-WarnMsg "Unable to set ACL on ASCII-safe root. Ensure adequate permissions on: $script:CodexAsciiRoot"
     }
+
+    $env:CODEX_HOME = $script:CodexHome
+    [Environment]::SetEnvironmentVariable('CODEX_HOME', $script:CodexHome, 'User')
 }
 
 function Command-Exists([string]$Name) {
@@ -191,7 +172,7 @@ function Get-CodexRuntimeHint([int]$ExitCode) {
             if (Test-Path $helperScript) {
                 $hint += ' You can run install-vc-redist-x64.cmd from this package.'
             }
-            $hint += ' If the runtime is already installed, inspect antivirus/AppLocker and the native executable under the configured npm prefix (for example %APPDATA%\npm or C:\Users\Public\Codex\npm).'
+            $hint += ' If the runtime is already installed, inspect antivirus/AppLocker and the native executable under the configured npm prefix (for example %APPDATA%\npm or C:\Codex\npm).'
             return $hint
         }
         default {
@@ -369,16 +350,6 @@ function Ensure-CurrentPathContains([string]$PathEntry, [switch]$Prepend) {
 
 function Resolve-NpmGlobalBinDir {
     Ensure-CodexPathSettings
-
-    try {
-        $prefix = (& npm config get prefix).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($prefix)) {
-            return $prefix
-        }
-    }
-    catch {
-    }
-
     return $script:CodexNpmPrefix
 }
 
@@ -793,38 +764,14 @@ function Ensure-NpmUserPrefix {
     New-Item -ItemType Directory -Path $target -Force | Out-Null
     New-Item -ItemType Directory -Path $script:CodexNpmCache -Force | Out-Null
 
-    if ($script:UseAsciiSafePaths) {
-        $env:NPM_CONFIG_PREFIX = $target
-        $env:NPM_CONFIG_CACHE = $script:CodexNpmCache
-        if (-not [string]::IsNullOrWhiteSpace($script:CodexNpmUserConfig)) {
-            $env:NPM_CONFIG_USERCONFIG = $script:CodexNpmUserConfig
-        }
-    }
+    Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue
+    Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue
+    Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue
+    [Environment]::SetEnvironmentVariable('NPM_CONFIG_PREFIX', $null, 'User')
+    [Environment]::SetEnvironmentVariable('NPM_CONFIG_CACHE', $null, 'User')
+    [Environment]::SetEnvironmentVariable('NPM_CONFIG_USERCONFIG', $null, 'User')
 
-    $current = $null
-    try {
-        $current = (& npm config get prefix).Trim()
-    }
-    catch {
-    }
-
-    if ([string]::IsNullOrWhiteSpace($current) -or ($current -ne $target)) {
-        & npm config set prefix $target | Out-Null
-        Write-Info "Set npm prefix to user directory: $target"
-    }
-
-    if ($script:UseAsciiSafePaths) {
-        try {
-            $currentCache = (& npm config get cache).Trim()
-            if ([string]::IsNullOrWhiteSpace($currentCache) -or ($currentCache -ne $script:CodexNpmCache)) {
-                & npm config set cache $script:CodexNpmCache | Out-Null
-                Write-Info "Set npm cache to ASCII directory: $script:CodexNpmCache"
-            }
-        }
-        catch {
-            Write-WarnMsg "Failed to verify npm cache config: $($_.Exception.Message)"
-        }
-    }
+    Write-Info "Codex npm prefix for this install: $target"
 }
 
 function Resolve-NodeInstallDir {
@@ -1518,7 +1465,7 @@ function Install-CodexPackage {
     Ensure-CodexPathSettings
 
     $npmPrefixForInstall = $script:CodexNpmPrefix
-    & npm install -g --prefix $npmPrefixForInstall '@openai/codex'
+    & npm install -g --prefix $npmPrefixForInstall --cache $script:CodexNpmCache '@openai/codex'
     $installExit = $LASTEXITCODE
     if ($installExit -eq 0) {
         return
@@ -1542,7 +1489,7 @@ function Install-CodexPackage {
     Start-Sleep -Seconds 1
 
     $npmPrefixForInstall = $script:CodexNpmPrefix
-    & npm install -g --prefix $npmPrefixForInstall '@openai/codex'
+    & npm install -g --prefix $npmPrefixForInstall --cache $script:CodexNpmCache '@openai/codex'
     $retryExit = $LASTEXITCODE
     if ($retryExit -ne 0) {
         throw "npm install -g @openai/codex failed (exit $retryExit). Close terminals/tools using codex.exe and retry."

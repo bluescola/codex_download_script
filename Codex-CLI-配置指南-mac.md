@@ -118,7 +118,9 @@ requires_openai_auth = false
 env_key = "CRS_OAI_KEY"
 
 [features]
+# 实际已去除
 tui_app_server = false
+# 关闭MCP和 工具 / 列表 / 发现/建议
 apps = false
 
 [notice.model_migrations]

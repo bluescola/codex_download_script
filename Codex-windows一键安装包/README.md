@@ -24,8 +24,8 @@
 
 中文用户目录兼容：
 - 如果检测到 `USERPROFILE` / `APPDATA` / `LOCALAPPDATA` / `TEMP` 等路径包含中文或其他非 ASCII 字符，安装脚本会自动启用“ASCII 安全路径”。
-- 启用后，Node、npm 全局包、npm 缓存和 Codex 配置会放到类似 `C:\Users\Public\Codex` 的英文路径下，避免 Codex 原生程序或 npm wrapper 在中文用户目录中启动失败。
-- 脚本会同步写入用户级环境变量：`NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`、`NPM_CONFIG_USERCONFIG`、`CODEX_HOME`，并把对应 npm bin 目录加入用户 `Path`。
+- 启用后，Node、npm 全局包、npm 缓存和 Codex 配置会放到类似 `C:\Codex` 的英文路径下，且该目录会自动设置 ACL 仅当前用户可访问，避免 Codex 原生程序或 npm wrapper 在中文用户目录中启动失败。
+- 脚本安装 Codex 时会显式使用 ASCII 安全 npm prefix/cache，但不会长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`、`NPM_CONFIG_USERCONFIG`；只会按需写入 `CODEX_HOME`，并把对应 npm bin 目录加入用户 `Path`。
 - 如需自定义英文根目录，可在运行前设置用户/进程环境变量 `CODEX_WINDOWS_ASCII_ROOT`，例如 `C:\CodexData`。
 
 系统级 Codex 处理：
