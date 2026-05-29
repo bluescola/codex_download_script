@@ -22,8 +22,6 @@ function Resolve-AsciiSafeRoot {
     $candidates = New-Object System.Collections.Generic.List[string]
     foreach ($candidate in @(
         $env:CODEX_WINDOWS_ASCII_ROOT,
-        $(if (-not [string]::IsNullOrWhiteSpace($env:PUBLIC)) { Join-Path $env:PUBLIC 'Codex' }),
-        $(if (-not [string]::IsNullOrWhiteSpace($env:ProgramData)) { Join-Path $env:ProgramData 'Codex' }),
         'C:\Codex'
     )) {
         if (-not [string]::IsNullOrWhiteSpace($candidate)) {
@@ -153,6 +151,19 @@ function Initialize-AsciiSafeEnvironment {
         if (-not [string]::IsNullOrWhiteSpace($dir)) {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
         }
+    }
+
+    # Lock ASCII-safe root directory to current user only.
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    try {
+        $aclArgs = @(
+            $script:CodexAsciiRoot, '/inheritance:r', '/grant:r',
+            "${currentUser}:(OI)(CI)F", '/Q'
+        )
+        & icacls @aclArgs 2>$null
+        Write-Info "Secured ASCII-safe root to current user: $currentUser"
+    } catch {
+        Write-WarnMsg "Unable to set ACL on ASCII-safe root. Ensure adequate permissions on: $script:CodexAsciiRoot"
     }
 
     $env:NPM_CONFIG_PREFIX = $script:CodexNpmPrefix
