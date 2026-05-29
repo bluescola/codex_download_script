@@ -270,73 +270,56 @@ read_secret_required() {
   done
 }
 
-install_node_user() {
-  log_info "Installing Node.js LTS to user directory (no sudo)..."
+install_nvm_and_node() {
+  local nvm_install_url="https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh"
+
+  # Use ASCII-safe directory when HOME contains non-ASCII
+  if [[ "$USE_ASCII_SAFE_PATHS" -eq 1 ]]; then
+    export NVM_DIR="$CODEX_UNIX_ROOT/.nvm"
+  else
+    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  fi
 
   if ! cmd_exists curl; then
-    echo "[ERROR] curl is required but not found." >&2
+    echo "[ERROR] curl is required to install nvm." >&2
     exit 1
   fi
 
-  local arch node_arch
-  arch="$(uname -m)"
-  case "$arch" in
-    x86_64|amd64) node_arch='linux-x64' ;;
-    aarch64|arm64) node_arch='linux-arm64' ;;
-    armv7l) node_arch='linux-armv7l' ;;
-    *)
-      echo "[ERROR] Unsupported CPU architecture: $arch" >&2
-      exit 1
-      ;;
-  esac
+  log_info "Installing nvm and Node.js LTS (user-space, no sudo)..."
 
-  local lts_version
-  # NOTE: Do not exit early in the consumer (awk) when piping from curl.
-  # Exiting early closes the pipe, curl then errors with:
-  #   curl: (23) Failure writing output to destination
-  # which is fatal under `set -o pipefail`.
-  lts_version="$(
-    curl -fsSL https://nodejs.org/dist/index.tab |
-      awk -F'\t' -v arch="$node_arch" '
-        NR==1 { next }
-        $10 != "-" && index($3, arch) > 0 && !found { v=$1; found=1 }
-        END { if (found) print v; else exit 1 }
-      '
-  )"
-  if [[ -z "$lts_version" ]]; then
-    echo "[ERROR] Failed to resolve Node.js LTS version." >&2
-    exit 1
+  # Install nvm if not present
+  if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
+    log_info "Downloading nvm..."
+    curl -o- "$nvm_install_url" | bash 2>&1 | while IFS= read -r line; do
+      case "$line" in
+        *"% Total"*|*"Dload"*) continue ;;
+        *) printf '[NVM] %s\n' "$line" ;;
+      esac
+    done
   fi
 
-  local tmp_dir tarball node_file node_url
-  tmp_dir="$(mktemp -d)"
-  tarball="$tmp_dir/node.tar.xz"
-  node_file="node-${lts_version}-${node_arch}.tar.xz"
-  node_url="https://nodejs.org/dist/${lts_version}/${node_file}"
-  curl -fsSL "$node_url" -o "$tarball"
-  verify_download_sha256 "$lts_version" "$node_file" "$tarball"
+  # Load nvm into current shell
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-  mkdir -p "$NODE_ROOT"
-  tar -xJf "$tarball" -C "$NODE_ROOT"
+  # Install Node LTS
+  log_info "Installing Node.js LTS via nvm..."
+  nvm install --lts
+  nvm use --lts
+  nvm alias default 'lts/*'
 
-  local extracted_dir="$NODE_ROOT/node-${lts_version}-${node_arch}"
-  local target_dir="$NODE_ROOT/$lts_version"
-  if [[ -d "$target_dir" ]]; then
-    rm -rf "$target_dir"
-  fi
-  mv "$extracted_dir" "$target_dir"
-  ln -sfn "$target_dir" "$NODE_ROOT/current"
-
-  export PATH="$NODE_ROOT/current/bin:$PATH"
+  # Set PATH for current session (nvm already adds itself to rc files)
+  local node_bin_dir
+  node_bin_dir="$(dirname "$(which node)")"
+  export PATH="$node_bin_dir:$PATH"
   hash -r
 
   log_ok "Node.js: $(node -v)"
   log_ok "npm: $(npm -v)"
+  log_ok "nvm + Node.js installed under: $NVM_DIR"
 }
 
 ensure_node_npm() {
-  # Prefer system Node.js/npm when available: downloading Node in user space is
-  # slower and unnecessary on most Ubuntu servers.
+  # Prefer system Node.js/npm or nvm-managed Node when available.
   if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && cmd_exists node && cmd_exists npm; then
     log_info "Using existing Node.js/npm from PATH."
     log_ok "Node.js: $(node -v)"
@@ -344,91 +327,7 @@ ensure_node_npm() {
     return 0
   fi
 
-  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && [[ -x "$NODE_ROOT/current/bin/node" ]] && [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
-    export PATH="$NODE_ROOT/current/bin:$PATH"
-    hash -r
-    log_info "Using user Node.js and npm under: $NODE_ROOT/current/bin"
-    log_ok "Node.js: $("$NODE_ROOT/current/bin/node" -v)"
-    log_ok "npm: $("$NODE_ROOT/current/bin/npm" -v)"
-    return 0
-  fi
-
-  if [[ "$FORCE_NODE_REINSTALL" -eq 1 && -d "$NODE_ROOT" ]]; then
-    log_info "Removing previous user Node.js install at $NODE_ROOT"
-    rm -rf "$NODE_ROOT"
-  fi
-
-  install_node_user
-}
-
-upsert_path_block() {
-  local file="$1"
-  local block_start="$2"
-  local block_end="$3"
-  local line="$4"
-
-  if [[ ! -f "$file" ]]; then
-    touch "$file"
-  fi
-
-  if grep -qF "$block_start" "$file"; then
-    local tmp
-    tmp="$(mktemp)"
-    awk -v start="$block_start" -v end="$block_end" -v line="$line" '
-      $0==start {print start; print line; print end; inblock=1; next}
-      $0==end {inblock=0; next}
-      !inblock {print}
-    ' "$file" > "$tmp"
-    mv "$tmp" "$file"
-  else
-    printf '\n%s\n%s\n%s\n' "$block_start" "$line" "$block_end" >> "$file"
-  fi
-}
-
-ensure_user_npm_prefix() {
-  local user_prefix="$NPM_PREFIX"
-  local npm_prefix
-  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
-
-  mkdir -p "$user_prefix"
-  mkdir -p "$NPM_CACHE"
-  export NPM_CONFIG_PREFIX="$user_prefix"
-  export NPM_CONFIG_CACHE="$NPM_CACHE"
-  export CODEX_HOME="$CODEX_HOME_DIR"
-
-  if [[ "$npm_prefix" != "$user_prefix" ]]; then
-    log_info "Setting npm global prefix to user directory: $user_prefix"
-    npm config set prefix "$user_prefix"
-  fi
-
-  local npm_cache
-  npm_cache="$(npm config get cache 2>/dev/null || true)"
-  if [[ "$npm_cache" != "$NPM_CACHE" ]]; then
-    log_info "Setting npm cache to user directory: $NPM_CACHE"
-    npm config set cache "$NPM_CACHE"
-  fi
-
-  local npm_bin="${user_prefix%/}/bin"
-  local node_bin=""
-  if [[ -d "$NODE_ROOT/current/bin" ]]; then
-    node_bin="$NODE_ROOT/current/bin"
-  fi
-  export PATH="$npm_bin:$PATH"
-  hash -r
-
-  local block_start="# >>> codex user paths >>>"
-  local block_end="# <<< codex user paths <<<"
-  local line="export NPM_CONFIG_PREFIX=\"$user_prefix\"; export NPM_CONFIG_CACHE=\"$NPM_CACHE\"; export CODEX_HOME=\"$CODEX_HOME_DIR\"; export PATH=\"$npm_bin"
-  if [[ -n "$node_bin" ]]; then
-    line="$line:$node_bin"
-  fi
-  line="$line:\$PATH\""
-
-  upsert_path_block "$HOME/.bashrc" "$block_start" "$block_end" "$line"
-  upsert_path_block "$HOME/.zshrc" "$block_start" "$block_end" "$line"
-
-  log_ok "npm prefix: $(npm config get prefix)"
-  log_ok "Ensured PATH includes: $npm_bin"
+  install_nvm_and_node
 }
 
 trim_trailing_slash() {
@@ -888,9 +787,11 @@ CFG
 
   export CODEX_HOME="$codex_dir"
 
-  # Persist in common shells.
-  upsert_env_in_file "$HOME/.bashrc" "CODEX_HOME" "$codex_dir"
-  upsert_env_in_file "$HOME/.zshrc" "CODEX_HOME" "$codex_dir"
+  # Persist CODEX_HOME in shell rc only when non-standard (not ~/.codex).
+  if [[ "$codex_dir" != "$HOME/.codex" ]]; then
+    upsert_env_in_file "$HOME/.bashrc" "CODEX_HOME" "$codex_dir"
+    upsert_env_in_file "$HOME/.zshrc" "CODEX_HOME" "$codex_dir"
+  fi
   remove_env_from_file "$HOME/.bashrc" "CRS_OAI_KEY"
   remove_env_from_file "$HOME/.zshrc" "CRS_OAI_KEY"
   unset CRS_OAI_KEY || true
@@ -933,7 +834,6 @@ main() {
   else
     warn_system_codex
   fi
-  ensure_user_npm_prefix
   ensure_codex
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
