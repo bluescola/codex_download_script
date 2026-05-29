@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Codex NO_PROXY bypass setup (macOS)
 # - Reads base_url from CODEX_HOME/config.toml or ~/.codex/config.toml.
-# - Adds CRS host, host:port, localhost, and 127.0.0.1 to NO_PROXY/no_proxy.
+# - Rebuilds NO_PROXY/no_proxy with CRS host, host:port, localhost, and 127.0.0.1 only.
 # - Persists across reboot by updating shell profiles and installing a LaunchAgent.
 # - Idempotent: safe to run multiple times.
 
@@ -37,10 +37,6 @@ log "Current NO_PROXY/no_proxy:"
 echo "  NO_PROXY=${NO_PROXY:-}"
 echo "  no_proxy=${no_proxy:-}"
 
-trim() {
-  echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
-}
-
 contains() {
   local needle="$1"; shift
   local item
@@ -51,17 +47,6 @@ contains() {
 }
 
 items=()
-for current in "${NO_PROXY:-}" "${no_proxy:-}"; do
-  IFS=',' read -r -a parts <<< "${current}"
-  for p in "${parts[@]}"; do
-    p="$(trim "$p")"
-    [[ -z "$p" ]] && continue
-    if ! contains "$p" "${items[@]}"; then
-      items+=("$p")
-    fi
-  done
-done
-
 for v in "${required[@]}"; do
   if contains "$v" "${items[@]}"; then
     log "Already present: $v"
