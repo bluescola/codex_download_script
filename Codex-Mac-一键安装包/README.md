@@ -12,13 +12,12 @@ bash install-codex-cli-mac.sh
 
 ## 脚本会做什么
 
-- 检查/安装用户级 Node.js LTS 和 npm。
-- 下载 Node.js tarball 后校验 Node 官方 `SHASUMS256.txt` 中的 SHA256，校验失败会中止。
-- 安装 `@openai/codex` 到用户 npm prefix。
+- 检查现有 Node.js 是否为受支持 LTS 线；否则通过 Homebrew 安装 Node.js 24 LTS 和 npm。
+- 安装 `@openai/codex` 到 Homebrew `node@24` 的 npm 全局前缀。
 - 写入 Codex CRS 配置，默认 `sandbox_mode = "workspace-write"`。
 - 写入前会备份已有 `config.toml` 和 `auth.json`，不会删除历史备份。
 - 持久化 `CRS_OAI_KEY` 到 zsh/bash 常见 profile 文件（包括 `~/.zshrc`、`~/.zprofile`、`~/.bash_profile`、`~/.bashrc`）；只有启用 ASCII 安全路径等非默认 Codex 目录时才持久化 `CODEX_HOME`。
-- 只把用户 npm bin 目录写入 profile 的 `PATH` 代码块；npm prefix/cache 通过 npm 配置文件管理，不再长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`。
+- 不再长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`；Codex 跟随 Homebrew `node@24` 的 npm 全局前缀。
 - 配置 `NO_PROXY/no_proxy`，会尝试从 `CODEX_HOME` 或 `~/.codex/config.toml` 读取 CRS `base_url` 并加入实际 host/host:port。
 
 ## 系统级 Codex
@@ -40,6 +39,6 @@ bash install-codex-cli-mac.sh --remove-system-codex
 - `--skip-crs-config`：跳过 CRS 配置交互。
 - `--skip-no-proxy`：跳过 NO_PROXY/no_proxy 配置。
 
-## 下载校验说明
+## Node.js 版本说明
 
-如果没有 SHA256 校验，下载被代理/CDN/缓存污染、被篡改或损坏时，脚本可能继续解压错误二进制。现在校验失败会直接中止，请检查网络代理或重新下载后再试。
+macOS 安装器使用 Homebrew 的 `node@24` 公式安装明确的 LTS 版本；如果系统已有受支持的 Node.js LTS 线，会直接复用。

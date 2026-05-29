@@ -12,9 +12,9 @@ bash install-codex-cli-linux.sh
 
 ## 脚本会做什么
 
-- 检查/安装用户级 Node.js LTS 和 npm。
-- 下载 Node.js tarball 后校验 Node 官方 `SHASUMS256.txt` 中的 SHA256，校验失败会中止。
-- 安装 `@openai/codex` 到用户 npm prefix。
+- 检查/安装 nvm 管理的 Node.js LTS 和 npm。
+- 安装 `@openai/codex` 到 nvm 当前 LTS Node.js 的 npm 全局前缀。
+- 不再长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`；Codex 跟随 nvm 管理的 Node.js 前缀。
 - 写入 Codex CRS 配置，默认 `sandbox_mode = "workspace-write"`。
 - 写入前会备份已有 `config.toml` 和 `auth.json`，不会删除历史备份。
 - 配置 `NO_PROXY/no_proxy`，会尝试从 `CODEX_HOME` 或 `~/.codex/config.toml` 读取 CRS `base_url` 并加入实际 host/host:port。

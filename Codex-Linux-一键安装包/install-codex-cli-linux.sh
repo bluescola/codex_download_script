@@ -26,15 +26,11 @@ fi
 if [[ "$USE_ASCII_SAFE_PATHS" -eq 1 ]]; then
   CODEX_UNIX_ROOT="${CODEX_UNIX_ASCII_ROOT:-$DEFAULT_ASCII_ROOT}"
   CODEX_UNIX_ROOT="${CODEX_UNIX_ROOT%/}"
-  NODE_ROOT="$CODEX_UNIX_ROOT/node"
-  NPM_PREFIX="$CODEX_UNIX_ROOT/npm"
-  NPM_CACHE="$CODEX_UNIX_ROOT/npm-cache"
+  NVM_DIR="$CODEX_UNIX_ROOT/.nvm"
   CODEX_HOME_DIR="$CODEX_UNIX_ROOT/.codex"
 else
   CODEX_UNIX_ROOT=""
-  NODE_ROOT="${HOME}/.local/node"
-  NPM_PREFIX="${HOME}/.npm-global"
-  NPM_CACHE="${HOME}/.npm-cache"
+  NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   CODEX_HOME_DIR="${HOME}/.codex"
 fi
 
@@ -87,38 +83,6 @@ log_ok() { printf '[OK] %s\n' "$*"; }
 
 cmd_exists() { command -v "$1" >/dev/null 2>&1; }
 
-verify_download_sha256() {
-  local version="$1"
-  local file_name="$2"
-  local file_path="$3"
-  local sums_url expected actual
-
-  sums_url="https://nodejs.org/dist/${version}/SHASUMS256.txt"
-  log_info "Downloading checksum manifest: $sums_url"
-  expected="$(
-    curl -fsSL "$sums_url" |
-      awk -v f="$file_name" '$2 == f { print $1; found=1 } END { if (!found) exit 1 }'
-  )"
-
-  if cmd_exists sha256sum; then
-    actual="$(sha256sum "$file_path" | awk '{print $1}')"
-  elif cmd_exists shasum; then
-    actual="$(shasum -a 256 "$file_path" | awk '{print $1}')"
-  else
-    echo "[ERROR] sha256sum or shasum is required to verify the Node.js download." >&2
-    exit 1
-  fi
-
-  actual="$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')"
-  expected="$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')"
-  if [[ "$actual" != "$expected" ]]; then
-    echo "[ERROR] SHA256 verification failed for $file_name. Expected $expected, got $actual" >&2
-    exit 1
-  fi
-
-  log_ok "SHA256 verified: $actual"
-}
-
 require_linux() {
   if [[ "$(uname -s)" != "Linux" ]]; then
     echo "[ERROR] This script is for Linux only." >&2
@@ -140,10 +104,8 @@ initialize_ascii_safe_environment() {
 
   log_warn "Detected non-ASCII characters in HOME/TMPDIR. Using an ASCII-only Codex root to avoid Node/npm/Codex path issues."
   log_info "ASCII Codex root: $CODEX_UNIX_ROOT"
-  mkdir -p "$CODEX_UNIX_ROOT" "$NODE_ROOT" "$NPM_PREFIX" "$NPM_CACHE" "$CODEX_HOME_DIR"
+  mkdir -p "$CODEX_UNIX_ROOT" "$NVM_DIR" "$CODEX_HOME_DIR"
   chmod 700 "$CODEX_UNIX_ROOT" 2>/dev/null || true
-  export NPM_CONFIG_PREFIX="$NPM_PREFIX"
-  export NPM_CONFIG_CACHE="$NPM_CACHE"
   export CODEX_HOME="$CODEX_HOME_DIR"
 }
 
@@ -180,9 +142,14 @@ shell_single_quote() {
 }
 
 test_preexisting_node_npm() {
-  if [[ -x "$NODE_ROOT/current/bin/node" ]] && [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
-    return 0
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck source=/dev/null
+    \. "$NVM_DIR/nvm.sh"
+    if nvm use --silent default >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1; then
+      return 0
+    fi
   fi
+
   cmd_exists node && cmd_exists npm
 }
 
@@ -191,17 +158,10 @@ test_preexisting_codex() {
     return 0
   fi
 
-  # Codex is usually installed under the user npm prefix.
-  if [[ -x "$NPM_PREFIX/bin/codex" ]]; then
-    return 0
-  fi
-
   if test_preexisting_node_npm; then
     local npm_cmd prefix npm_bin
-    npm_cmd="npm"
-    if [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
-      npm_cmd="$NODE_ROOT/current/bin/npm"
-    fi
+    npm_cmd="$(command -v npm 2>/dev/null || true)"
+    [[ -n "$npm_cmd" ]] || return 1
 
     prefix="$("$npm_cmd" config get prefix 2>/dev/null || true)"
     npm_bin="${prefix%/}/bin"
@@ -270,165 +230,98 @@ read_secret_required() {
   done
 }
 
-install_node_user() {
-  log_info "Installing Node.js LTS to user directory (no sudo)..."
+install_nvm_and_node() {
+  local nvm_install_url="https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh"
+  export NVM_DIR
 
   if ! cmd_exists curl; then
-    echo "[ERROR] curl is required but not found." >&2
+    echo "[ERROR] curl is required to install nvm." >&2
     exit 1
   fi
 
-  local arch node_arch
-  arch="$(uname -m)"
-  case "$arch" in
-    x86_64|amd64) node_arch='linux-x64' ;;
-    aarch64|arm64) node_arch='linux-arm64' ;;
-    armv7l) node_arch='linux-armv7l' ;;
-    *)
-      echo "[ERROR] Unsupported CPU architecture: $arch" >&2
-      exit 1
-      ;;
-  esac
+  log_info "Installing nvm and Node.js LTS (user-space, no sudo)..."
 
-  local lts_version
-  # NOTE: Do not exit early in the consumer (awk) when piping from curl.
-  # Exiting early closes the pipe, curl then errors with:
-  #   curl: (23) Failure writing output to destination
-  # which is fatal under `set -o pipefail`.
-  lts_version="$(
-    curl -fsSL https://nodejs.org/dist/index.tab |
-      awk -F'\t' -v arch="$node_arch" '
-        NR==1 { next }
-        $10 != "-" && index($3, arch) > 0 && !found { v=$1; found=1 }
-        END { if (found) print v; else exit 1 }
-      '
-  )"
-  if [[ -z "$lts_version" ]]; then
-    echo "[ERROR] Failed to resolve Node.js LTS version." >&2
-    exit 1
+  if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
+    log_info "Downloading nvm..."
+    curl -o- "$nvm_install_url" | bash 2>&1 | while IFS= read -r line; do
+      case "$line" in
+        *"% Total"*|*"Dload"*) continue ;;
+        *) printf '[NVM] %s\n' "$line" ;;
+      esac
+    done
   fi
 
-  local tmp_dir tarball node_file node_url
-  tmp_dir="$(mktemp -d)"
-  tarball="$tmp_dir/node.tar.xz"
-  node_file="node-${lts_version}-${node_arch}.tar.xz"
-  node_url="https://nodejs.org/dist/${lts_version}/${node_file}"
-  curl -fsSL "$node_url" -o "$tarball"
-  verify_download_sha256 "$lts_version" "$node_file" "$tarball"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-  mkdir -p "$NODE_ROOT"
-  tar -xJf "$tarball" -C "$NODE_ROOT"
+  log_info "Installing Node.js LTS via nvm..."
+  nvm install --lts
+  nvm use --lts
+  nvm alias default 'lts/*'
 
-  local extracted_dir="$NODE_ROOT/node-${lts_version}-${node_arch}"
-  local target_dir="$NODE_ROOT/$lts_version"
-  if [[ -d "$target_dir" ]]; then
-    rm -rf "$target_dir"
-  fi
-  mv "$extracted_dir" "$target_dir"
-  ln -sfn "$target_dir" "$NODE_ROOT/current"
-
-  export PATH="$NODE_ROOT/current/bin:$PATH"
+  local node_bin_dir
+  node_bin_dir="$(dirname "$(which node)")"
+  export PATH="$node_bin_dir:$PATH"
   hash -r
 
   log_ok "Node.js: $(node -v)"
   log_ok "npm: $(npm -v)"
+  log_ok "nvm + Node.js installed under: $NVM_DIR"
 }
 
 ensure_node_npm() {
-  # Prefer system Node.js/npm when available: downloading Node in user space is
-  # slower and unnecessary on most Ubuntu servers.
-  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && cmd_exists node && cmd_exists npm; then
-    log_info "Using existing Node.js/npm from PATH."
-    log_ok "Node.js: $(node -v)"
-    log_ok "npm: $(npm -v)"
+  export NVM_DIR
+
+  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck source=/dev/null
+    \. "$NVM_DIR/nvm.sh"
+    if nvm use --silent default >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1; then
+      log_info "Using Node.js/npm from nvm."
+      log_ok "Node.js: $(node -v)"
+      log_ok "npm: $(npm -v)"
+      return 0
+    fi
+  fi
+
+  install_nvm_and_node
+}
+
+ensure_nvm_node_active() {
+  export NVM_DIR
+  if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
+    install_nvm_and_node
+  fi
+
+  # shellcheck source=/dev/null
+  \. "$NVM_DIR/nvm.sh"
+  if nvm use --silent default >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1; then
     return 0
   fi
 
-  if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && [[ -x "$NODE_ROOT/current/bin/node" ]] && [[ -x "$NODE_ROOT/current/bin/npm" ]]; then
-    export PATH="$NODE_ROOT/current/bin:$PATH"
-    hash -r
-    log_info "Using user Node.js and npm under: $NODE_ROOT/current/bin"
-    log_ok "Node.js: $("$NODE_ROOT/current/bin/node" -v)"
-    log_ok "npm: $("$NODE_ROOT/current/bin/npm" -v)"
-    return 0
-  fi
-
-  if [[ "$FORCE_NODE_REINSTALL" -eq 1 && -d "$NODE_ROOT" ]]; then
-    log_info "Removing previous user Node.js install at $NODE_ROOT"
-    rm -rf "$NODE_ROOT"
-  fi
-
-  install_node_user
+  install_nvm_and_node
+  # shellcheck source=/dev/null
+  \. "$NVM_DIR/nvm.sh"
+  nvm use --silent default >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1
 }
 
-upsert_path_block() {
-  local file="$1"
-  local block_start="$2"
-  local block_end="$3"
-  local line="$4"
-
-  if [[ ! -f "$file" ]]; then
-    touch "$file"
-  fi
-
-  if grep -qF "$block_start" "$file"; then
-    local tmp
-    tmp="$(mktemp)"
-    awk -v start="$block_start" -v end="$block_end" -v line="$line" '
-      $0==start {print start; print line; print end; inblock=1; next}
-      $0==end {inblock=0; next}
-      !inblock {print}
-    ' "$file" > "$tmp"
-    mv "$tmp" "$file"
-  else
-    printf '\n%s\n%s\n%s\n' "$block_start" "$line" "$block_end" >> "$file"
-  fi
-}
-
-ensure_user_npm_prefix() {
-  local user_prefix="$NPM_PREFIX"
-  local npm_prefix
-  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
-
-  mkdir -p "$user_prefix"
-  mkdir -p "$NPM_CACHE"
-  export NPM_CONFIG_PREFIX="$user_prefix"
-  export NPM_CONFIG_CACHE="$NPM_CACHE"
-  export CODEX_HOME="$CODEX_HOME_DIR"
-
-  if [[ "$npm_prefix" != "$user_prefix" ]]; then
-    log_info "Setting npm global prefix to user directory: $user_prefix"
-    npm config set prefix "$user_prefix"
-  fi
-
-  local npm_cache
-  npm_cache="$(npm config get cache 2>/dev/null || true)"
-  if [[ "$npm_cache" != "$NPM_CACHE" ]]; then
-    log_info "Setting npm cache to user directory: $NPM_CACHE"
-    npm config set cache "$NPM_CACHE"
-  fi
-
-  local npm_bin="${user_prefix%/}/bin"
-  local node_bin=""
-  if [[ -d "$NODE_ROOT/current/bin" ]]; then
-    node_bin="$NODE_ROOT/current/bin"
-  fi
-  export PATH="$npm_bin:$PATH"
-  hash -r
-
+cleanup_legacy_path_block() {
+  # Remove stale # >>> codex user paths >>> blocks
+  # written by previous versions of this installer (pre-nvm era).
   local block_start="# >>> codex user paths >>>"
   local block_end="# <<< codex user paths <<<"
-  local line="export NPM_CONFIG_PREFIX=\"$user_prefix\"; export NPM_CONFIG_CACHE=\"$NPM_CACHE\"; export CODEX_HOME=\"$CODEX_HOME_DIR\"; export PATH=\"$npm_bin"
-  if [[ -n "$node_bin" ]]; then
-    line="$line:$node_bin"
-  fi
-  line="$line:\$PATH\""
 
-  upsert_path_block "$HOME/.bashrc" "$block_start" "$block_end" "$line"
-  upsert_path_block "$HOME/.zshrc" "$block_start" "$block_end" "$line"
-
-  log_ok "npm prefix: $(npm config get prefix)"
-  log_ok "Ensured PATH includes: $npm_bin"
+  for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    if [[ -f "$rc_file" ]] && grep -qF "$block_start" "$rc_file" 2>/dev/null; then
+      log_info "Removing legacy path block from: $rc_file"
+      local tmp
+      tmp="$(mktemp)"
+      awk -v start="$block_start" -v end="$block_end" '
+        index($0, start) { inblock=1; next }
+        index($0, end)   { inblock=0; next }
+        !inblock { print }
+      ' "$rc_file" > "$tmp"
+      mv "$tmp" "$rc_file"
+    fi
+  done
 }
 
 trim_trailing_slash() {
@@ -450,7 +343,7 @@ path_under() {
 
 is_user_npm_path() {
   local path="$1"
-  path_under "$path" "$NPM_PREFIX" || path_under "$path" "$HOME"
+  path_under "$path" "$NVM_DIR" || path_under "$path" "$HOME"
 }
 
 is_system_prefix_candidate() {
@@ -633,33 +526,44 @@ warn_system_codex() {
   for prefix in "${SYSTEM_CODEX_PREFIXES[@]}"; do
     log_warn "Detected system-level Codex CLI: $prefix"
   done
-  log_warn "Leaving system-level Codex untouched. This installer puts the user npm bin directory first in PATH."
+  log_warn "Leaving system-level Codex untouched. This installer installs Codex under the nvm Node.js prefix."
   log_warn "If you explicitly want to remove system-level Codex, rerun with --remove-system-codex."
 }
 
 ensure_codex() {
   local npm_prefix npm_bin
-  npm_prefix="$NPM_PREFIX"
+  ensure_nvm_node_active
+
+  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  if [[ -z "$npm_prefix" ]]; then
+    echo "[ERROR] Failed to resolve npm global prefix from nvm Node.js." >&2
+    exit 1
+  fi
+  if ! path_under "$npm_prefix" "$NVM_DIR"; then
+    echo "[ERROR] Refusing to install Codex outside nvm prefix: $npm_prefix" >&2
+    echo "[ERROR] Expected npm prefix under: $NVM_DIR" >&2
+    exit 1
+  fi
   npm_bin="${npm_prefix%/}/bin"
 
   if [[ "$FORCE_CODEX_REINSTALL" -eq 1 ]]; then
-    log_info "Force reinstall enabled: removing existing Codex CLI in user prefix..."
-    npm uninstall -g --prefix "$npm_prefix" @openai/codex >/dev/null 2>&1 || true
+    log_info "Force reinstall enabled: removing existing Codex CLI from nvm Node.js prefix..."
+    npm uninstall -g @openai/codex >/dev/null 2>&1 || true
   else
     if [[ -x "$npm_bin/codex" ]]; then
       if "$npm_bin/codex" --version >/dev/null 2>&1; then
-        log_info "Codex CLI already installed in user prefix: $($npm_bin/codex --version)"
+        log_info "Codex CLI already installed in nvm Node.js prefix: $("$npm_bin/codex" --version)"
         return 0
       fi
-      log_warn "codex exists in user prefix but failed to run; will reinstall."
+      log_warn "codex exists in nvm Node.js prefix but failed to run; will reinstall."
     fi
   fi
 
-  log_info "Installing Codex CLI to user prefix ($npm_prefix)..."
-  if npm install -g --prefix "$npm_prefix" @openai/codex >/dev/null 2>&1; then
+  log_info "Installing Codex CLI to nvm Node.js prefix ($npm_prefix)..."
+  if npm install -g @openai/codex >/dev/null 2>&1; then
     :
   else
-    echo "[ERROR] npm install -g --prefix \"$npm_prefix\" @openai/codex failed. Check npm prefix and permissions." >&2
+    echo "[ERROR] npm install -g @openai/codex failed. Check nvm prefix and permissions: $npm_prefix" >&2
     exit 1
   fi
 
@@ -676,12 +580,11 @@ ensure_codex() {
     resolved="$(command -v codex)"
     if [[ "$resolved" != "$npm_bin/codex" ]]; then
       log_warn "PATH resolves codex to: $resolved"
-      log_warn "Expected user prefix: $npm_bin/codex"
-      log_warn "Open a new shell or ensure PATH has $npm_bin first."
+      log_warn "Expected nvm Node.js prefix: $npm_bin/codex"
+      log_warn "Open a new shell or ensure the active Node.js bin directory is first in PATH."
     fi
   else
-    log_warn "codex is not in current PATH. Open a new shell or add this to your shell profile:"
-    printf 'export PATH="%s:$PATH"\n' "$npm_bin"
+    log_warn "codex is not in current PATH. Open a new shell or load nvm before running codex."
   fi
 }
 
@@ -830,7 +733,9 @@ requires_openai_auth = false
 env_key = "CRS_OAI_KEY"
 
 [features]
+# 实际已去除
 tui_app_server = false
+# 关闭MCP和 工具 / 列表 / 发现/建议
 apps = false
 
 [notice.model_migrations]
@@ -850,12 +755,20 @@ AUTH
   # Persist in common shells.
   upsert_env_in_file "$HOME/.bashrc" "CRS_OAI_KEY" "$crs_key"
   upsert_env_in_file "$HOME/.zshrc" "CRS_OAI_KEY" "$crs_key"
-  upsert_env_in_file "$HOME/.bashrc" "CODEX_HOME" "$codex_dir"
-  upsert_env_in_file "$HOME/.zshrc" "CODEX_HOME" "$codex_dir"
+
+  # Persist CODEX_HOME in shell rc only when non-standard (not ~/.codex).
+  if [[ "$codex_dir" != "$HOME/.codex" ]]; then
+    upsert_env_in_file "$HOME/.bashrc" "CODEX_HOME" "$codex_dir"
+    upsert_env_in_file "$HOME/.zshrc" "CODEX_HOME" "$codex_dir"
+  fi
 
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"
-  log_ok "Persisted CRS_OAI_KEY and CODEX_HOME in ~/.bashrc and ~/.zshrc"
+  if [[ "$codex_dir" != "$HOME/.codex" ]]; then
+    log_ok "Persisted CRS_OAI_KEY and CODEX_HOME in ~/.bashrc and ~/.zshrc"
+  else
+    log_ok "Persisted CRS_OAI_KEY in ~/.bashrc and ~/.zshrc"
+  fi
 }
 
 configure_no_proxy() {
@@ -891,8 +804,14 @@ main() {
   else
     warn_system_codex
   fi
-  ensure_user_npm_prefix
   ensure_codex
+
+  # Clean up legacy path blocks and env vars from pre-nvm installer versions.
+  cleanup_legacy_path_block
+  remove_env_from_file "$HOME/.bashrc" "NPM_CONFIG_PREFIX"
+  remove_env_from_file "$HOME/.bashrc" "NPM_CONFIG_CACHE"
+  remove_env_from_file "$HOME/.zshrc" "NPM_CONFIG_PREFIX"
+  remove_env_from_file "$HOME/.zshrc" "NPM_CONFIG_CACHE"
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
     configure_crs "$clean_existing_config"

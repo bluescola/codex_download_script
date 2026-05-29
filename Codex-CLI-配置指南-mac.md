@@ -14,13 +14,14 @@
 
 ### 步骤 0: 安装 Node.js（含 npm）
 
-请先安装 **Node.js LTS（建议 >= 18）**。
+请先安装 **Node.js 24 LTS**。
 
-方式 1（推荐）：Homebrew
+方式 1（推荐）：Homebrew 安装 LTS 版本
 
 ```bash
 brew --version
-brew install node
+brew install node@24
+export PATH="$(brew --prefix node@24)/bin:$PATH"
 node -v
 npm -v
 ```
