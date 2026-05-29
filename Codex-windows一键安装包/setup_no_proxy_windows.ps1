@@ -1,6 +1,6 @@
 # Codex NO_PROXY bypass setup (Windows)
 # - Reads base_url from CODEX_HOME\config.toml or %USERPROFILE%\.codex\config.toml.
-# - Adds CRS host, host:port, localhost, and 127.0.0.1 to NO_PROXY at User scope.
+# - Rebuilds NO_PROXY at User scope with CRS host, host:port, localhost, and 127.0.0.1 only.
 # - Idempotent: safe to run multiple times.
 # - Persists across reboot for the current Windows user.
 
@@ -57,17 +57,13 @@ function Add-Unique([System.Collections.Generic.List[string]]$List, [string]$Ite
 Write-Log "Reading current NO_PROXY..."
 $CurrentUser = [Environment]::GetEnvironmentVariable("NO_PROXY", "User")
 $CurrentProcess = $env:NO_PROXY
-$CurrentSafe = @(
-  $(if ($null -eq $CurrentUser) { "" } else { $CurrentUser }),
-  $(if ($null -eq $CurrentProcess) { "" } else { $CurrentProcess })
-) -join ","
 
 Write-Log "Current NO_PROXY (User/Process):"
 Write-Host ("  User:    " + $(if ($null -eq $CurrentUser) { "" } else { $CurrentUser }))
 Write-Host ("  Process: " + $(if ($null -eq $CurrentProcess) { "" } else { $CurrentProcess }))
 
 $Items = New-Object System.Collections.Generic.List[string]
-foreach ($v in (Normalize-List $CurrentSafe)) { Add-Unique $Items $v }
+foreach ($v in (Normalize-List ($Required -join ","))) { Add-Unique $Items $v }
 
 foreach ($v in $Required) {
   if ($Items.Contains($v)) {
@@ -80,7 +76,7 @@ foreach ($v in $Required) {
 
 $NewValue = ($Items -join ",")
 
-if ($NewValue -eq $CurrentSafe) {
+if (($NewValue -eq $CurrentUser) -and ($NewValue -eq $CurrentProcess)) {
   Write-Log "NO_PROXY already up-to-date. No changes written."
 } else {
   Write-Log "Writing NO_PROXY to User environment variables (persistent)..."
