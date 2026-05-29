@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$ForceNodeReinstall,
     [switch]$ForceCodexReinstall,
     [switch]$SkipCrsConfig,
