@@ -1081,17 +1081,33 @@ configure_crs() {
   escaped_openai_key="$(escape_json_string "$openai_key")"
   log_debug "CRS config values escaped."
 
-  log_debug "Ensuring CODEX_HOME directory exists: $codex_dir"
-  mkdir -p "$codex_dir"
+  log_debug "Preparing CODEX_HOME directory stage."
+  log_debug "CODEX_HOME directory target: ${codex_dir:-<empty>}"
+  if [[ -z "${codex_dir:-}" ]]; then
+    echo "[ERROR] CODEX_HOME_DIR resolved to an empty path." >&2
+    exit 1
+  fi
+  if ! mkdir -p "$codex_dir"; then
+    echo "[ERROR] Failed to create CODEX_HOME directory: $codex_dir" >&2
+    exit 1
+  fi
   log_debug "CODEX_HOME directory ready."
   if [[ "$clean_existing" -eq 1 ]]; then
     log_info "Detected existing node/npm/codex; creating temporary CRS backups before regenerating..."
   fi
   local backup_paths=()
   local backup_path
-  backup_path="$(backup_if_exists "$config_path")"
+  log_debug "Backing up config.toml if it already exists."
+  if ! backup_path="$(backup_if_exists "$config_path")"; then
+    echo "[ERROR] Failed while backing up existing config file: $config_path" >&2
+    exit 1
+  fi
   [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
-  backup_path="$(backup_if_exists "$auth_path")"
+  log_debug "Backing up auth.json if it already exists."
+  if ! backup_path="$(backup_if_exists "$auth_path")"; then
+    echo "[ERROR] Failed while backing up existing auth file: $auth_path" >&2
+    exit 1
+  fi
   [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
   log_debug "CRS backup stage complete."
 

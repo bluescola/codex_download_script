@@ -88,6 +88,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Implication:
   the unresolved failure is after `resolve_crs_base_url()` and after env capture, so the next debugging surface is the escape/write phase or the `CODEX_HOME` directory preparation.
 
+### 10. Current remaining failure is narrow enough that generic step annotations are no longer sufficient
+
+- Observed on 2026-06-01 in run `26719317167`.
+- Symptom:
+  the latest visible installer line is `CRS config values escaped.`, but GitHub annotations still do not expose the exact failing shell command after that point.
+- Current mitigation in the smoke branch:
+  the config-only step now runs the installer under `bash -x` and emits a larger tail window on failure so the next run should show the exact command or branch that exits.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
