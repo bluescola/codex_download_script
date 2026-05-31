@@ -113,6 +113,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   legacy shell-variable/profile cleanup now logs warnings and continues instead of aborting the installer.
 
+### 13. GitHub annotations were showing the oldest lines from the tail window, not the true final failing lines
+
+- Observed on 2026-06-01 while comparing runs `26719698277` and `26719769769`.
+- Symptom:
+  the annotations kept stopping around the `.zprofile` / `.bash_profile` cleanup trace, but that was still not enough to prove the actual final failing command.
+- Current mitigation in the smoke branch:
+  on config-step failure, the workflow now emits the last 12 installer log lines in reverse order so GitHub annotations show the newest lines first.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:

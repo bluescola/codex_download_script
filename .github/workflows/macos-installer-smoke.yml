@@ -200,7 +200,22 @@ jobs:
             echo "::group::apply-crs-config.log"
             cat "$log_file" || true
             echo "::endgroup::"
-            tail -n 80 "$log_file" | sed 's/^/::error::/' || true
+            python3 - "$log_file" <<'PY'
+            import sys
+            from pathlib import Path
+
+            path = Path(sys.argv[1])
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except FileNotFoundError:
+                lines = ["log file missing"]
+
+            if not lines:
+                lines = ["log file is empty"]
+
+            for line in reversed(lines[-12:]):
+                print(f"::error::{line}")
+            PY
             exit 1
           fi
 
