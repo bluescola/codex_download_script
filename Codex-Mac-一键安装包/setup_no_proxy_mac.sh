@@ -68,14 +68,14 @@ for current in "${NO_PROXY:-}" "${no_proxy:-}"; do
       log "Removing legacy fixed IP: $p"
       continue
     fi
-    if ! contains "$p" "${items[@]}"; then
+    if ((${#items[@]} == 0)) || ! contains "$p" "${items[@]}"; then
       items+=("$p")
     fi
   done
 done
 
 for v in "${required[@]}"; do
-  if contains "$v" "${items[@]}"; then
+  if ((${#items[@]} > 0)) && contains "$v" "${items[@]}"; then
     log "Already present: $v"
   else
     log "Adding: $v"
@@ -84,13 +84,15 @@ for v in "${required[@]}"; do
 done
 
 new=""
-for i in "${items[@]}"; do
-  if [[ -z "$new" ]]; then
-    new="$i"
-  else
-    new="${new},${i}"
-  fi
-done
+if ((${#items[@]} > 0)); then
+  for i in "${items[@]}"; do
+    if [[ -z "$new" ]]; then
+      new="$i"
+    else
+      new="${new},${i}"
+    fi
+  done
+fi
 
 log "New NO_PROXY:"
 echo "  ${new}"
