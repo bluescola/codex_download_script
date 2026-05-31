@@ -57,6 +57,7 @@ contains() {
 
 items=()
 for current in "${NO_PROXY:-}" "${no_proxy:-}"; do
+  [[ -n "$current" ]] || continue
   IFS=',' read -r -a parts <<< "${current}"
   for p in "${parts[@]}"; do
     p="$(trim "$p")"
