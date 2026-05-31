@@ -129,14 +129,18 @@ nano ~/.codex/config.toml
 
 ```toml
 model_provider = "crs"
-model = "gpt-5.2"
+model = "gpt-5.4"
+review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
+network_access = "enabled"
 preferred_auth_method = "apikey"
 
-sandbox_mode = "workspace-write"
-approval_policy = "on-request"
-# 高风险：仅在完全理解风险时才改为 approval_policy = "never"
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+# 正常模式：
+# sandbox_mode = "workspace-write"
+# approval_policy = "on-request"
 
 [model_providers.crs]
 name = "crs"
@@ -164,7 +168,7 @@ base_url = "http://x.x.x.x:10086/openai"
 ```
 
 **模型说明**：
-- 默认使用 `gpt-5.2`（如管理员提供其他模型名，也可以直接替换 `model = "..."`）
+- 默认使用 `gpt-5.4`（如管理员提供其他模型名，也可以直接替换 `model = "..."`）
 
 **推理深度**：
 - `low`: 快速响应
@@ -460,7 +464,7 @@ echo "问题" | codex
 
 ### 1. `~/.codex/config.toml`
 - 设置 `base_url` 为 CRS 服务器地址
-- 配置 `model` 和 `model_reasoning_effort`
+- 配置 `model` / `review_model` 和 `model_reasoning_effort`
 - 指定 `env_key = "CRS_OAI_KEY"`
 
 ### 2. `~/.codex/auth.json`

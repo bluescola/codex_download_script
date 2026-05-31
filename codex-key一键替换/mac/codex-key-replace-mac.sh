@@ -48,13 +48,18 @@ write_default_config() {
   local base_url="$2"
   cat > "$file" <<CFG
 model_provider = "crs"
-model = "gpt-5.2"
+model = "gpt-5.4"
+review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
+network_access = "enabled"
 preferred_auth_method = "apikey"
 
-sandbox_mode = "workspace-write"
-approval_policy = "on-request"
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+# Normal mode:
+# sandbox_mode = "workspace-write"
+# approval_policy = "on-request"
 
 [model_providers.crs]
 name = "crs"
@@ -64,9 +69,112 @@ requires_openai_auth = false
 env_key = "CRS_OAI_KEY"
 
 [features]
+# 实际已去除
 tui_app_server = false
+# 关闭MCP和 工具 / 列表 / 发现/建议
 apps = false
+
+[notice.model_migrations]
+"gpt-5.1-codex-max" = "gpt-5.4"
+"gpt-5.2" = "gpt-5.4"
 CFG
+}
+
+upsert_toml_root_kv() {
+  local file="$1"
+  local key="$2"
+  local newline="$3"
+  local tmp
+  tmp="$(mktemp)"
+
+  awk -v key="$key" -v newline="$newline" '
+    function is_section(line) { return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/ }
+    BEGIN { key_written=0; entered_section=0 }
+    {
+      if (!entered_section && is_section($0)) {
+        if (!key_written) {
+          print newline
+          key_written=1
+        }
+        entered_section=1
+      }
+      if (!entered_section && $0 ~ "^[[:space:]]*" key "[[:space:]]*=") {
+        if (!key_written) {
+          print newline
+          key_written=1
+        }
+        next
+      }
+      print
+    }
+    END {
+      if (!key_written) {
+        print newline
+      }
+    }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
+
+upsert_toml_comment_before_section() {
+  local file="$1"
+  local section="$2"
+  local comment="$3"
+  local tmp
+  tmp="$(mktemp)"
+
+  awk -v section="$section" -v comment="$comment" '
+    function is_section(line) { return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/ }
+    function section_name(line, s) {
+      s=line
+      sub(/^[[:space:]]*\[/, "", s)
+      sub(/\][[:space:]]*$/, "", s)
+      return s
+    }
+    $0 == comment { next }
+    is_section($0) && section_name($0) == section && !done {
+      print comment
+      done=1
+    }
+    { print }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
+
+upsert_toml_comment_before_key_in_section() {
+  local file="$1"
+  local section="$2"
+  local key="$3"
+  local comment="$4"
+  local tmp
+  tmp="$(mktemp)"
+
+  awk -v section="$section" -v key="$key" -v comment="$comment" '
+    function is_section(line) { return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/ }
+    function section_name(line, s) {
+      s=line
+      sub(/^[[:space:]]*\[/, "", s)
+      sub(/\][[:space:]]*$/, "", s)
+      return s
+    }
+    BEGIN { in_target=0; done=0 }
+    $0 == comment { next }
+    is_section($0) {
+      in_target=(section_name($0) == section)
+      print
+      next
+    }
+    in_target && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+      if (!done) {
+        print comment
+        done=1
+      }
+      print
+      next
+    }
+    { print }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
 }
 
 upsert_toml_section_kv() {
@@ -180,8 +288,29 @@ if grep -qiE '^[[:space:]]*requires_openai_auth[[:space:]]*=[[:space:]]*true[[:s
   requires_was_true=1
 fi
 
+upsert_toml_root_kv "$CONFIG_PATH" "model_provider" 'model_provider = "crs"'
+upsert_toml_root_kv "$CONFIG_PATH" "model" 'model = "gpt-5.4"'
+upsert_toml_root_kv "$CONFIG_PATH" "review_model" 'review_model = "gpt-5.4"'
+upsert_toml_root_kv "$CONFIG_PATH" "model_reasoning_effort" 'model_reasoning_effort = "xhigh"'
+upsert_toml_root_kv "$CONFIG_PATH" "disable_response_storage" 'disable_response_storage = true'
+upsert_toml_root_kv "$CONFIG_PATH" "network_access" 'network_access = "enabled"'
+upsert_toml_root_kv "$CONFIG_PATH" "preferred_auth_method" 'preferred_auth_method = "apikey"'
+upsert_toml_root_kv "$CONFIG_PATH" "sandbox_mode" 'sandbox_mode = "danger-full-access"'
+upsert_toml_root_kv "$CONFIG_PATH" "approval_policy" 'approval_policy = "never"'
+upsert_toml_section_kv "$CONFIG_PATH" "model_providers.crs" "name" 'name = "crs"'
 upsert_toml_section_kv "$CONFIG_PATH" "model_providers.crs" "base_url" "base_url = \"$escaped_base_url\""
+upsert_toml_section_kv "$CONFIG_PATH" "model_providers.crs" "wire_api" 'wire_api = "responses"'
 upsert_toml_section_kv "$CONFIG_PATH" "model_providers.crs" "requires_openai_auth" "requires_openai_auth = false"
+upsert_toml_section_kv "$CONFIG_PATH" "model_providers.crs" "env_key" 'env_key = "CRS_OAI_KEY"'
+upsert_toml_section_kv "$CONFIG_PATH" "features" "tui_app_server" 'tui_app_server = false'
+upsert_toml_section_kv "$CONFIG_PATH" "features" "apps" 'apps = false'
+upsert_toml_section_kv "$CONFIG_PATH" "notice.model_migrations" '"gpt-5.1-codex-max"' '"gpt-5.1-codex-max" = "gpt-5.4"'
+upsert_toml_section_kv "$CONFIG_PATH" "notice.model_migrations" '"gpt-5.2"' '"gpt-5.2" = "gpt-5.4"'
+upsert_toml_comment_before_section "$CONFIG_PATH" "model_providers.crs" '# Normal mode:'
+upsert_toml_comment_before_section "$CONFIG_PATH" "model_providers.crs" '# sandbox_mode = "workspace-write"'
+upsert_toml_comment_before_section "$CONFIG_PATH" "model_providers.crs" '# approval_policy = "on-request"'
+upsert_toml_comment_before_key_in_section "$CONFIG_PATH" "features" "tui_app_server" '# 实际已去除'
+upsert_toml_comment_before_key_in_section "$CONFIG_PATH" "features" "apps" '# 关闭MCP和 工具 / 列表 / 发现/建议'
 
 rc_files=("$HOME/.zshrc" "$HOME/.zprofile")
 if [[ "${SHELL:-}" == *"bash" ]]; then

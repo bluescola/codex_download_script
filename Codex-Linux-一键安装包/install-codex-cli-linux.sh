@@ -1107,14 +1107,18 @@ configure_crs() {
 
   cat > "$config_path" <<CFG
 model_provider = "crs"
-model = "gpt-5.2"
+model = "gpt-5.4"
+review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
+network_access = "enabled"
 preferred_auth_method = "apikey"
 
-sandbox_mode = "workspace-write"
-approval_policy = "on-request"
-# High risk: only use approval_policy = "never" if you fully understand the risk.
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+# Normal mode:
+# sandbox_mode = "workspace-write"
+# approval_policy = "on-request"
 
 [model_providers.crs]
 name = "crs"
