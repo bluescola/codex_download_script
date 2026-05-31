@@ -192,7 +192,11 @@ jobs:
           test "$status" = "200"
 
           log_file="$RUNNER_TEMP/apply-crs-config.log"
-          if ! bash install-codex-cli-mac.sh --verbose --skip-no-proxy >"$log_file" 2>&1; then
+          echo "CODEX_CRS_BASE_URL=${CODEX_CRS_BASE_URL:+set}"
+          echo "CODEX_CRS_OPENAI_API_KEY=${CODEX_CRS_OPENAI_API_KEY:+set}"
+          if ! CODEX_CRS_BASE_URL="$CODEX_CRS_BASE_URL" \
+               CODEX_CRS_OPENAI_API_KEY="$CODEX_CRS_OPENAI_API_KEY" \
+               bash install-codex-cli-mac.sh --verbose --skip-no-proxy >"$log_file" 2>&1; then
             echo "::group::apply-crs-config.log"
             cat "$log_file" || true
             echo "::endgroup::"

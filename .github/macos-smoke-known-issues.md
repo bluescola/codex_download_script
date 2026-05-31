@@ -63,6 +63,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   the workflow now splits `CRS2.0 config` and `NO_PROXY` into separate steps and prints the captured step log back into the Actions UI on failure.
 
+### 7. `CRS2.0` config step can silently fall back to interactive prompts if env propagation is unclear
+
+- Observed on 2026-06-01 in run `26718891077`.
+- Symptom:
+  the captured log reached `Starting CRS configuration...` and stopped before logging `Using CRS base_url...` or `Using CRS 2.0 token...`.
+- Current mitigation in the smoke branch:
+  the installer now emits explicit non-interactive errors when `CODEX_CRS_BASE_URL` or `CODEX_CRS_OPENAI_API_KEY` is missing, and the workflow echoes whether both env vars are set before invoking the config step.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
