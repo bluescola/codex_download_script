@@ -1048,6 +1048,7 @@ configure_crs() {
   log_info "Starting CRS configuration..."
   log_debug "CRS env: CODEX_CRS_BASE_URL=$(env_state CODEX_CRS_BASE_URL), CODEX_CRS_OPENAI_API_KEY=$(env_state CODEX_CRS_OPENAI_API_KEY)"
   if [[ -n "${CODEX_CRS_BASE_URL:-}" ]]; then
+    log_debug "CRS base_url source: env"
     base_url_input="$CODEX_CRS_BASE_URL"
     log_info "Using CRS base_url from CODEX_CRS_BASE_URL."
   elif [[ ! -t 0 ]]; then
@@ -1056,8 +1057,10 @@ configure_crs() {
   else
     base_url_input="$(read_required 'Enter CRS base_url (must expose /responses, example: http://x.x.x.x:10086/openai): ')"
   fi
+  log_debug "CRS base_url input captured."
 
   if [[ -n "${CODEX_CRS_OPENAI_API_KEY:-}" ]]; then
+    log_debug "CRS token source: env"
     openai_key="$CODEX_CRS_OPENAI_API_KEY"
     log_info "Using CRS 2.0 token from CODEX_CRS_OPENAI_API_KEY."
   elif [[ ! -t 0 ]]; then
@@ -1066,11 +1069,14 @@ configure_crs() {
   else
     openai_key="$(read_secret_required 'Enter OPENAI_API_KEY / CRS 2.0 token (hidden input): ')"
   fi
+  log_debug "CRS token captured."
 
   base_url="$(resolve_crs_base_url "$base_url_input")"
+  log_debug "CRS base_url resolved to: $base_url"
   local base_url_toml
   base_url_toml="$(toml_escape "$base_url")"
   escaped_openai_key="$(escape_json_string "$openai_key")"
+  log_debug "CRS config values escaped."
 
   mkdir -p "$codex_dir"
   if [[ "$clean_existing" -eq 1 ]]; then
@@ -1082,6 +1088,7 @@ configure_crs() {
   [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
   backup_path="$(backup_if_exists "$auth_path")"
   [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
+  log_debug "CRS backup stage complete."
 
   cat > "$config_path" <<CFG
 model_provider = "OpenAI"
@@ -1115,11 +1122,13 @@ apps = false
 CFG
 
   printf '{\n  "OPENAI_API_KEY": "%s"\n}\n' "$escaped_openai_key" > "$auth_path"
+  log_debug "CRS config files written to disk."
 
   unset CRS_OAI_KEY || true
   for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     remove_env_from_file "$rc_file" "CRS_OAI_KEY"
   done
+  log_debug "Legacy CRS_OAI_KEY exports cleaned."
 
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"

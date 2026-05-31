@@ -71,6 +71,15 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   the installer now emits explicit non-interactive errors when `CODEX_CRS_BASE_URL` or `CODEX_CRS_OPENAI_API_KEY` is missing, and the workflow echoes whether both env vars are set before invoking the config step.
 
+### 8. Current remaining failure is inside `configure_crs()` after env detection, not in GitHub macOS runner setup
+
+- Observed on 2026-06-01 in run `26718973268`.
+- Confirmed facts:
+  `Dry run`, `node@24` preparation, and `Install with mocked CRS 2.0 endpoint` all passed on both `macos-14` and `macos-15`.
+  The config step also confirmed `CODEX_CRS_BASE_URL=set` and `CODEX_CRS_OPENAI_API_KEY=set`.
+- Implication:
+  the remaining failure is now in the installer script's CRS2.0 config path itself, so workflow/platform tuning is no longer the primary bottleneck.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
