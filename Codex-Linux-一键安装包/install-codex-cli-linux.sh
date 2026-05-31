@@ -620,6 +620,41 @@ upsert_env_in_file() {
   mv "$tmp" "$file"
 }
 
+remove_env_from_file() {
+  local file="$1"
+  local key="$2"
+  local expected_value="${3:-}"
+  local expected_quoted=""
+
+  if [[ ! -f "$file" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$expected_value" ]]; then
+    expected_quoted="$(shell_single_quote "$expected_value")"
+  fi
+
+  if grep -qE "^[[:space:]]*export[[:space:]]+${key}=" "$file"; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v k="$key" -v expected="$expected_value" -v expected_quoted="$expected_quoted" '
+      $0 ~ "^[[:space:]]*export[[:space:]]+" k "=" {
+        rhs = $0
+        sub("^[[:space:]]*export[[:space:]]+" k "=", "", rhs)
+        sub("^[[:space:]]*", "", rhs)
+        if (expected == "" ||
+            rhs == expected ||
+            rhs == expected_quoted ||
+            rhs == "\"" expected "\"") {
+          next
+        }
+      }
+      { print }
+    ' "$file" > "$tmp"
+    mv "$tmp" "$file"
+  fi
+}
+
 probe_crs_responses_route() {
   local base_url="$1"
   local probe_url status
