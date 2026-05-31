@@ -105,6 +105,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Fix:
   skip the `unset` when `CRS_OAI_KEY` is a readonly shell variable, instead of relying on `unset ... || true`.
 
+### 12. Legacy profile cleanup should be best-effort, not a hard failure
+
+- Observed on 2026-06-01 while iterating on runs `26719582470` and `26719698277`.
+- Rationale:
+  removing stale `CRS_OAI_KEY` exports from shell profile files is helpful hygiene, but it should not block a successful CRS2.0 install after `config.toml` and `auth.json` are already written.
+- Current mitigation in the smoke branch:
+  legacy shell-variable/profile cleanup now logs warnings and continues instead of aborting the installer.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:

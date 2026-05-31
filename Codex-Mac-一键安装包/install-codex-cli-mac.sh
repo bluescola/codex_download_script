@@ -170,7 +170,9 @@ unset_shell_var_if_possible() {
     log_warn "Shell variable is readonly; skipping unset: $name"
     return 0
   fi
-  unset "$name" 2>/dev/null || true
+  if ! unset "$name" 2>/dev/null; then
+    log_warn "Could not unset shell variable cleanly; continuing: $name"
+  fi
   return 0
 }
 
@@ -934,8 +936,11 @@ remove_env_from_file() {
 
   if grep -qE "^[[:space:]]*export[[:space:]]+${key}=" "$file"; then
     local tmp
-    tmp="$(mktemp)"
-    awk -v k="$key" -v expected="$expected_value" -v expected_quoted="$expected_quoted" '
+    if ! tmp="$(mktemp)"; then
+      log_warn "Failed to allocate a temp file while removing $key from $file; continuing."
+      return 0
+    fi
+    if ! awk -v k="$key" -v expected="$expected_value" -v expected_quoted="$expected_quoted" '
       $0 ~ "^[[:space:]]*export[[:space:]]+" k "=" {
         rhs = $0
         sub("^[[:space:]]*export[[:space:]]+" k "=", "", rhs)
@@ -948,9 +953,18 @@ remove_env_from_file() {
         }
       }
       { print }
-    ' "$file" > "$tmp"
-    mv "$tmp" "$file"
+    ' "$file" > "$tmp"; then
+      rm -f "$tmp" 2>/dev/null || true
+      log_warn "Failed to rewrite $file while removing $key; continuing."
+      return 0
+    fi
+    if ! mv "$tmp" "$file"; then
+      rm -f "$tmp" 2>/dev/null || true
+      log_warn "Failed to replace $file while removing $key; continuing."
+      return 0
+    fi
   fi
+  return 0
 }
 
 cleanup_obsolete_profile_env() {
@@ -1157,6 +1171,7 @@ CFG
 
   unset_shell_var_if_possible "CRS_OAI_KEY"
   for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    log_debug "Removing legacy CRS_OAI_KEY export from: $rc_file"
     remove_env_from_file "$rc_file" "CRS_OAI_KEY"
   done
   log_debug "Legacy CRS_OAI_KEY exports cleaned."
