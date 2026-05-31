@@ -374,7 +374,9 @@ ensure_homebrew_node_path_profile() {
     cat >> "$tmp" <<EOF
 
 $block_start
-export PATH=$quoted_node_bin:\$PATH
+if [[ ":\$PATH:" != *":$node_bin:"* ]]; then
+  export PATH=$quoted_node_bin:\$PATH
+fi
 $block_end
 EOF
 
