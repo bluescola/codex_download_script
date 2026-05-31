@@ -126,7 +126,7 @@ jobs:
 
           bash install-codex-cli-mac.sh --verbose --skip-crs-config --skip-no-proxy
 
-      - name: Apply CRS 2.0 config and NO_PROXY
+      - name: Apply CRS 2.0 config only
         shell: bash
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -191,7 +191,28 @@ jobs:
           done
           test "$status" = "200"
 
-          bash install-codex-cli-mac.sh --verbose
+          log_file="$RUNNER_TEMP/apply-crs-config.log"
+          if ! bash install-codex-cli-mac.sh --verbose --skip-no-proxy >"$log_file" 2>&1; then
+            echo "::group::apply-crs-config.log"
+            cat "$log_file" || true
+            echo "::endgroup::"
+            tail -n 20 "$log_file" | sed 's/^/::error::/' || true
+            exit 1
+          fi
+
+      - name: Apply NO_PROXY only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "Codex-Mac-一键安装包"
+          log_file="$RUNNER_TEMP/apply-no-proxy.log"
+          if ! bash setup_no_proxy_mac.sh >"$log_file" 2>&1; then
+            echo "::group::apply-no-proxy.log"
+            cat "$log_file" || true
+            echo "::endgroup::"
+            tail -n 20 "$log_file" | sed 's/^/::error::/' || true
+            exit 1
+          fi
 
       - name: Verify commands and CRS 2.0 artifacts
         shell: bash

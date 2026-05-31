@@ -55,6 +55,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Fix:
   make `backup_if_exists()` return success when there is nothing to back up.
 
+### 6. macOS Actions annotations may point at workflow line numbers without exposing script stderr
+
+- Observed on 2026-06-01 in run `26718707274`.
+- Symptom:
+  GitHub only reported `Process completed with exit code 1.` against the workflow YAML line, without the failing shell command from the installer path.
+- Current mitigation in the smoke branch:
+  the workflow now splits `CRS2.0 config` and `NO_PROXY` into separate steps and prints the captured step log back into the Actions UI on failure.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
