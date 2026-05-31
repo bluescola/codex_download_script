@@ -49,6 +49,7 @@ trim() {
 contains() {
   local needle="$1"; shift
   local item
+  [[ "$#" -gt 0 ]] || return 1
   for item in "$@"; do
     [[ "$item" == "$needle" ]] && return 0
   done
