@@ -414,17 +414,25 @@ is_supported_node_lts() {
 }
 
 ensure_node_npm() {
-  if cmd_exists node && cmd_exists npm && [[ "$FORCE_NODE_REINSTALL" -eq 0 ]]; then
-    if is_supported_node_lts; then
-      log_info "Using existing supported Node.js LTS and npm."
-      log_ok "Node.js: $(node -v)"
-      log_ok "npm: $(npm -v)"
-      return 0
-    fi
-    log_warn "Existing Node.js is not a supported LTS line: $(node -v). Installing Node.js 24 LTS."
+  if [[ "$FORCE_NODE_REINSTALL" -eq 1 ]]; then
+    install_brew_and_node
+  else
+    ensure_homebrew_node_active
   fi
 
-  install_brew_and_node
+  if ! cmd_exists node || ! cmd_exists npm; then
+    echo "[ERROR] Node.js/npm are not available after activating Homebrew node@24." >&2
+    exit 1
+  fi
+
+  if ! is_supported_node_lts; then
+    echo "[ERROR] Active Node.js is not a supported LTS line after activating Homebrew node@24: $(node -v)" >&2
+    exit 1
+  fi
+
+  log_info "Using Homebrew node@24 Node.js/npm."
+  log_ok "Node.js: $(node -v)"
+  log_ok "npm: $(npm -v)"
 }
 
 trim_trailing_slash() {
