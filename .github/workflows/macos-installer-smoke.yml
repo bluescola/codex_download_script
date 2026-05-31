@@ -124,7 +124,17 @@ jobs:
           done
           test "$status" = "200"
 
-          bash install-codex-cli-mac.sh --verbose
+          bash install-codex-cli-mac.sh --verbose --skip-crs-config --skip-no-proxy
+
+      - name: Apply CRS 2.0 config only
+        shell: bash
+        env:
+          CODEX_CRS_BASE_URL: "http://127.0.0.1:18080/api"
+          CODEX_CRS_OPENAI_API_KEY: "crs2-smoke-token"
+        run: |
+          set -euo pipefail
+          cd "Codex-Mac-一键安装包"
+          bash install-codex-cli-mac.sh --verbose --skip-no-proxy
 
       - name: Verify commands and CRS 2.0 artifacts
         shell: bash
