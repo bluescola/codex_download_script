@@ -1074,11 +1074,16 @@ configure_crs() {
   base_url="$(resolve_crs_base_url "$base_url_input")"
   log_debug "CRS base_url resolved to: $base_url"
   local base_url_toml
+  log_debug "Escaping CRS base_url for TOML."
   base_url_toml="$(toml_escape "$base_url")"
+  log_debug "CRS base_url TOML escape complete."
+  log_debug "Escaping CRS token for auth.json."
   escaped_openai_key="$(escape_json_string "$openai_key")"
   log_debug "CRS config values escaped."
 
+  log_debug "Ensuring CODEX_HOME directory exists: $codex_dir"
   mkdir -p "$codex_dir"
+  log_debug "CODEX_HOME directory ready."
   if [[ "$clean_existing" -eq 1 ]]; then
     log_info "Detected existing node/npm/codex; creating temporary CRS backups before regenerating..."
   fi

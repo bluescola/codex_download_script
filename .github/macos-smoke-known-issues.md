@@ -80,6 +80,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Implication:
   the remaining failure is now in the installer script's CRS2.0 config path itself, so workflow/platform tuning is no longer the primary bottleneck.
 
+### 9. `configure_crs()` now reaches URL auto-correction successfully before the remaining exit
+
+- Observed on 2026-06-01 in run `26719216861`.
+- Confirmed facts:
+  the script now logs the full `/api` -> `/openai` auto-correction path and confirms `CRS Responses route probe: 200`.
+- Implication:
+  the unresolved failure is after `resolve_crs_base_url()` and after env capture, so the next debugging surface is the escape/write phase or the `CODEX_HOME` directory preparation.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
