@@ -351,6 +351,39 @@ cleanup_legacy_path_block() {
   done
 }
 
+ensure_homebrew_node_path_profile() {
+  local node_bin="${ACTIVE_NODE_PREFIX%/}/bin"
+  local block_start="# >>> codex homebrew node path >>>"
+  local block_end="# <<< codex homebrew node path <<<"
+  local quoted_node_bin
+  quoted_node_bin="$(shell_single_quote "$node_bin")"
+
+  [[ -d "$node_bin" ]] || return 0
+
+  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    local tmp
+    touch "$rc_file"
+    tmp="$(mktemp)"
+
+    awk -v start="$block_start" -v end="$block_end" '
+      index($0, start) { inblock=1; next }
+      index($0, end)   { inblock=0; next }
+      !inblock { print }
+    ' "$rc_file" > "$tmp"
+
+    cat >> "$tmp" <<EOF
+
+$block_start
+export PATH=$quoted_node_bin:\$PATH
+$block_end
+EOF
+
+    mv "$tmp" "$rc_file"
+  done
+
+  log_ok "Persisted Homebrew node@24 PATH in zsh/bash profile files: $node_bin"
+}
+
 install_brew_and_node() {
   local node_formula="node@24"
   local node_prefix
@@ -994,6 +1027,7 @@ main() {
 
   # Clean up legacy path blocks and env vars from pre-Homebrew installer versions.
   cleanup_legacy_path_block
+  ensure_homebrew_node_path_profile
   for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     remove_env_from_file "$rc_file" "NPM_CONFIG_PREFIX"
     remove_env_from_file "$rc_file" "NPM_CONFIG_CACHE"

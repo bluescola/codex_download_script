@@ -39,16 +39,6 @@ jobs:
           cd "Codex-Mac-一键安装包"
           bash install-codex-cli-mac.sh --dry-run --verbose
 
-      - name: Inspect Homebrew node@24
-        shell: bash
-        run: |
-          brew --prefix node@24 || true
-          node24_prefix="$(brew --prefix node@24 2>/dev/null || true)"
-          if [ -n "$node24_prefix" ]; then
-            ls -la "$node24_prefix" || true
-            ls -la "$node24_prefix/bin" || true
-          fi
-
       - name: Install without CRS prompt
         shell: bash
         run: |
@@ -60,10 +50,15 @@ jobs:
         run: |
           source ~/.bash_profile 2>/dev/null || true
           source ~/.bashrc 2>/dev/null || true
+          node24_prefix="$(brew --prefix node@24)"
           node -v
           npm -v
           codex --version
           which node
           which npm
           which codex
+          test "$(which node)" = "$node24_prefix/bin/node"
+          test "$(which npm)" = "$node24_prefix/bin/npm"
+          test "$(which codex)" = "$node24_prefix/bin/codex"
+          node -p 'process.versions.node.split(".")[0]' | grep -qx '24'
           echo "NO_PROXY=${NO_PROXY:-}"
