@@ -35,13 +35,8 @@ jobs:
           bash -n "Codex-Mac-一键安装包/setup_no_proxy_mac.sh"
 
       - name: Dry run
-        continue-on-error: true
         shell: bash
         run: |
-          # Known issue on current CRS2.0 branch:
-          # GitHub macOS runners can fail this dry-run very early, before the real
-          # CRS2.0 installation path is exercised. Keep it non-blocking so the
-          # mocked CRS2.0 install and artifact verification still run.
           cd "Codex-Mac-一键安装包"
           bash install-codex-cli-mac.sh --dry-run --verbose
 
