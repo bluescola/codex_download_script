@@ -3,7 +3,9 @@ set -euo pipefail
 
 # Codex NO_PROXY bypass setup (macOS)
 # - Reads base_url from CODEX_HOME/config.toml or ~/.codex/config.toml.
+# - Removes legacy fixed IPs (3.27.43.117*) from existing NO_PROXY.
 # - Adds CRS host, host:port, localhost, and 127.0.0.1 to NO_PROXY/no_proxy.
+# - Preserves user-defined NO_PROXY entries.
 # - Persists across reboot by updating shell profiles and installing a LaunchAgent.
 # - Idempotent: safe to run multiple times.
 
@@ -12,6 +14,9 @@ log() {
 }
 
 required=("localhost" "127.0.0.1")
+
+# Legacy fixed IPs from older installer versions — strip these on every run.
+legacy_fixed=("3.27.43.117" "3.27.43.117:10086")
 
 append_crs_base_url_items() {
   local config_path="${CODEX_HOME:-$HOME/.codex}/config.toml"
@@ -56,6 +61,11 @@ for current in "${NO_PROXY:-}" "${no_proxy:-}"; do
   for p in "${parts[@]}"; do
     p="$(trim "$p")"
     [[ -z "$p" ]] && continue
+    # Strip legacy fixed IPs
+    if contains "$p" "${legacy_fixed[@]}"; then
+      log "Removing legacy fixed IP: $p"
+      continue
+    fi
     if ! contains "$p" "${items[@]}"; then
       items+=("$p")
     fi
@@ -119,7 +129,7 @@ upsert_block "$HOME/.zshrc"
 [[ -f "$HOME/.bash_profile" ]] && upsert_block "$HOME/.bash_profile"
 [[ -f "$HOME/.bashrc" ]] && upsert_block "$HOME/.bashrc"
 
-# Best-effort: set for current GUI session too (apps launched AFTER this should inherit).
+# Best-effort: set for current GUI session too.
 if command -v launchctl >/dev/null 2>&1; then
   log "Setting launchctl environment (current login session)..."
   launchctl setenv NO_PROXY "$new" || true
@@ -171,7 +181,6 @@ if command -v launchctl >/dev/null 2>&1; then
   uid="$(id -u)"
   domain="gui/$uid"
   log "Loading LaunchAgent (best-effort)..."
-  # Newer macOS: bootstrap/kickstart. Fallback to load -w.
   launchctl bootout "$domain" "$plist" >/dev/null 2>&1 || true
   launchctl bootstrap "$domain" "$plist" >/dev/null 2>&1 || true
   launchctl enable "$domain/$agent_label" >/dev/null 2>&1 || true
@@ -180,7 +189,6 @@ if command -v launchctl >/dev/null 2>&1; then
   if launchctl print "$domain/$agent_label" >/dev/null 2>&1; then
     log "LaunchAgent loaded: $domain/$agent_label"
   else
-    # Deprecated but sometimes still works.
     launchctl load -w "$plist" >/dev/null 2>&1 || true
     log "LaunchAgent load attempted (if it didn't load, you can re-login to apply)."
   fi

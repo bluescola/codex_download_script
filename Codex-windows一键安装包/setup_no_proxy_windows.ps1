@@ -1,6 +1,8 @@
 # Codex NO_PROXY bypass setup (Windows)
 # - Reads base_url from CODEX_HOME\config.toml or %USERPROFILE%\.codex\config.toml.
+# - Removes legacy fixed IPs (3.27.43.117*) from existing NO_PROXY.
 # - Adds CRS host, host:port, localhost, and 127.0.0.1 to NO_PROXY at User scope.
+# - Preserves user-defined NO_PROXY entries.
 # - Idempotent: safe to run multiple times.
 # - Persists across reboot for the current Windows user.
 
@@ -16,6 +18,9 @@ $Required = @(
   "localhost",
   "127.0.0.1"
 )
+
+# Legacy fixed IPs from older installer versions — strip these on every run.
+$LegacyFixed = @("3.27.43.117", "3.27.43.117:10086")
 
 function Add-CrsBaseUrlItems {
   $configCandidates = New-Object System.Collections.Generic.List[string]
@@ -67,7 +72,13 @@ Write-Host ("  User:    " + $(if ($null -eq $CurrentUser) { "" } else { $Current
 Write-Host ("  Process: " + $(if ($null -eq $CurrentProcess) { "" } else { $CurrentProcess }))
 
 $Items = New-Object System.Collections.Generic.List[string]
-foreach ($v in (Normalize-List $CurrentSafe)) { Add-Unique $Items $v }
+foreach ($v in (Normalize-List $CurrentSafe)) {
+  if ($LegacyFixed -contains $v) {
+    Write-Log "Removing legacy fixed IP: $v"
+    continue
+  }
+  Add-Unique $Items $v
+}
 
 foreach ($v in $Required) {
   if ($Items.Contains($v)) {
@@ -80,7 +91,7 @@ foreach ($v in $Required) {
 
 $NewValue = ($Items -join ",")
 
-if ($NewValue -eq $CurrentSafe) {
+if (($NewValue -eq $CurrentUser) -and ($NewValue -eq $CurrentProcess)) {
   Write-Log "NO_PROXY already up-to-date. No changes written."
 } else {
   Write-Log "Writing NO_PROXY to User environment variables (persistent)..."
@@ -96,7 +107,6 @@ Write-Log "New NO_PROXY:"
 Write-Host ("  " + $NewValue)
 
 # Broadcast WM_SETTINGCHANGE so new processes launched from Explorer pick up the change.
-# (Not required for persistence; without it you may need to re-login / restart apps.)
 try {
   if (-not ("Codex.NativeMethods" -as [type])) {
     Add-Type -TypeDefinition @"

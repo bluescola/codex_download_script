@@ -17,8 +17,6 @@ function Test-ContainsNonAscii([string]$Value) {
 function Resolve-AsciiSafeRoot {
     foreach ($candidate in @(
         $env:CODEX_WINDOWS_ASCII_ROOT,
-        $(if (-not [string]::IsNullOrWhiteSpace($env:PUBLIC)) { Join-Path $env:PUBLIC 'Codex' }),
-        $(if (-not [string]::IsNullOrWhiteSpace($env:ProgramData)) { Join-Path $env:ProgramData 'Codex' }),
         'C:\Codex'
     )) {
         if ([string]::IsNullOrWhiteSpace($candidate)) {
@@ -252,7 +250,7 @@ function Get-CodexRuntimeHint([int]$ExitCode) {
             if (Test-Path $helperScript) {
                 $hint += ' You can run install-vc-redist-x64.cmd from this package.'
             }
-            $hint += ' If the runtime is already installed, inspect antivirus/AppLocker and the native executable under the configured npm prefix (for example %APPDATA%\npm or C:\Users\Public\Codex\npm).'
+            $hint += ' If the runtime is already installed, inspect antivirus/AppLocker and the native executable under the configured npm prefix (for example %APPDATA%\npm or C:\Codex\npm).'
             return $hint
         }
         default {
