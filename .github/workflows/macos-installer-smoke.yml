@@ -1,0 +1,67 @@
+name: macOS Installer Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - "actions/**"
+    paths:
+      - ".github/workflows/macos-installer-smoke.yml"
+      - "Codex-Mac-一键安装包/**"
+      - "script-modules/**"
+
+jobs:
+  macos-smoke:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-14
+          - macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Syntax check
+        shell: bash
+        run: |
+          bash -n "Codex-Mac-一键安装包/install-codex-cli-mac.sh"
+          bash -n "Codex-Mac-一键安装包/setup_no_proxy_mac.sh"
+
+      - name: Dry run
+        shell: bash
+        run: |
+          cd "Codex-Mac-一键安装包"
+          bash install-codex-cli-mac.sh --dry-run --verbose
+
+      - name: Install without CRS prompt
+        shell: bash
+        run: |
+          cd "Codex-Mac-一键安装包"
+          bash install-codex-cli-mac.sh --verbose --skip-crs-config
+
+      - name: Verify commands
+        shell: bash
+        run: |
+          source ~/.bash_profile 2>/dev/null || true
+          source ~/.bashrc 2>/dev/null || true
+          source ~/.bash_profile 2>/dev/null || true
+          source ~/.bashrc 2>/dev/null || true
+          node24_prefix="$(brew --prefix node@24)"
+          node -v
+          npm -v
+          codex --version
+          which node
+          which npm
+          which codex
+          test "$(which node)" = "$node24_prefix/bin/node"
+          test "$(which npm)" = "$node24_prefix/bin/npm"
+          test "$(which codex)" = "$node24_prefix/bin/codex"
+          node -p 'process.versions.node.split(".")[0]' | grep -qx '24'
+          test "$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fx "$node24_prefix/bin" | wc -l | tr -d ' ')" = "1"
+          echo "NO_PROXY=${NO_PROXY:-}"

@@ -6,6 +6,10 @@ FORCE_CODEX_REINSTALL=0
 REMOVE_SYSTEM_CODEX=0
 SKIP_CRS_CONFIG=0
 SKIP_NO_PROXY=0
+DRY_RUN=0
+LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
+ACTIVE_NODE_PREFIX=""
+ACTIVE_NPM_CMD=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,6 +33,18 @@ while [[ $# -gt 0 ]]; do
       SKIP_NO_PROXY=1
       shift
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --verbose)
+      LOG_LEVEL="verbose"
+      shift
+      ;;
+    --trace)
+      LOG_LEVEL="trace"
+      shift
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage: install-codex-cli-mac.sh [options]
@@ -39,6 +55,9 @@ Options:
   --remove-system-codex    Explicitly remove system-level @openai/codex if detected
   --skip-crs-config        Skip interactive CRS config generation
   --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
+  --dry-run                Print preflight environment summary and exit without changes
+  --verbose                Print detailed diagnostic logs
+  --trace                  Print trace-level diagnostic logs
   -h, --help               Show this help
 USAGE
       exit 0
@@ -50,11 +69,61 @@ USAGE
   esac
 done
 
-log_info() { printf '[INFO] %s\n' "$*"; }
-log_warn() { printf '[WARN] %s\n' "$*"; }
-log_ok() { printf '[OK] %s\n' "$*"; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOGGING_MODULE="$REPO_ROOT/script-modules/logging/logging.sh"
+if [[ -f "$LOGGING_MODULE" ]]; then
+  # shellcheck source=../script-modules/logging/logging.sh
+  . "$LOGGING_MODULE"
+else
+  log_info() { printf '[INFO] %s\n' "$*"; }
+  log_warn() { printf '[WARN] %s\n' "$*"; }
+  log_ok() { printf '[OK] %s\n' "$*"; }
+  log_debug() {
+    case "$LOG_LEVEL" in
+      verbose|trace) printf '[DEBUG] %s\n' "$*" ;;
+    esac
+  }
+  log_trace() {
+    case "$LOG_LEVEL" in
+      trace) printf '[TRACE] %s\n' "$*" ;;
+    esac
+  }
+  codex_log_init() { CODEX_LOG_LEVEL="${1:-normal}"; }
+fi
+codex_log_init "$LOG_LEVEL"
 
 cmd_exists() { command -v "$1" >/dev/null 2>&1; }
+
+env_state() {
+  local name="$1"
+  if [[ -n "${!name:-}" ]]; then
+    printf 'set'
+  else
+    printf 'not set'
+  fi
+}
+
+command_path_or_none() {
+  command -v "$1" 2>/dev/null || printf 'not found'
+}
+
+command_version_or_none() {
+  local name="$1"
+  if ! cmd_exists "$name"; then
+    printf 'not available'
+    return 0
+  fi
+
+  case "$name" in
+    node|npm|codex)
+      "$name" --version 2>/dev/null | head -n 1 || printf 'not available'
+      ;;
+    *)
+      "$name" --version 2>/dev/null | head -n 1 || printf 'not available'
+      ;;
+  esac
+}
 
 contains_non_ascii() {
   local value="${1:-}"
@@ -87,8 +156,22 @@ backup_if_exists() {
     ts="$(date +%Y%m%d-%H%M%S)"
     local bkp="${p}.bak.${ts}"
     cp -f "$p" "$bkp"
-    log_info "Backed up: $bkp"
+    log_info "Backed up existing file: $bkp" >&2
+    printf '%s\n' "$bkp"
   fi
+}
+
+remove_crs_backups_after_success() {
+  local bkp
+  for bkp in "$@"; do
+    if [[ -n "$bkp" && -e "$bkp" ]]; then
+      if rm -f "$bkp"; then
+        log_info "Removed successful-write backup: $bkp"
+      else
+        log_warn "Failed to remove successful-write backup: $bkp"
+      fi
+    fi
+  done
 }
 
 toml_escape() {
@@ -214,6 +297,39 @@ initialize_ascii_safe_environment() {
   export CODEX_HOME="$CODEX_HOME_DIR"
 }
 
+print_preflight_summary() {
+  local npm_prefix npm_cache brew_path node24_prefix
+  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  npm_cache="$(npm config get cache 2>/dev/null || true)"
+  brew_path="$(command -v brew 2>/dev/null || true)"
+  if [[ -n "$brew_path" ]]; then
+    node24_prefix="$(brew --prefix node@24 2>/dev/null || true)"
+  else
+    node24_prefix=""
+  fi
+
+  log_info "Preflight environment summary:"
+  log_info "  Platform: $(uname -s) $(uname -m)"
+  log_info "  User: $(id -un 2>/dev/null || printf 'unknown') (uid=$(id -u 2>/dev/null || printf 'unknown'))"
+  log_info "  HOME: ${HOME:-not set}"
+  log_info "  TMPDIR: ${TMPDIR:-not set}"
+  log_info "  ASCII-safe mode: $USE_ASCII_SAFE_PATHS"
+  if [[ -n "$CODEX_UNIX_ROOT" ]]; then
+    log_info "  ASCII Codex root: $CODEX_UNIX_ROOT"
+  fi
+  log_info "  CODEX_HOME target: $CODEX_HOME_DIR"
+  log_info "  Homebrew: ${brew_path:-not found}"
+  log_info "  Homebrew node@24 prefix: ${node24_prefix:-not installed or not available}"
+  log_info "  node: $(command_path_or_none node) ($(command_version_or_none node))"
+  log_info "  npm: $(command_path_or_none npm) ($(command_version_or_none npm))"
+  log_info "  codex: $(command_path_or_none codex) ($(command_version_or_none codex))"
+  log_info "  npm prefix: ${npm_prefix:-not available}"
+  log_debug "npm cache: ${npm_cache:-not available}"
+  log_debug "Options: force_node=$FORCE_NODE_REINSTALL force_codex=$FORCE_CODEX_REINSTALL remove_system=$REMOVE_SYSTEM_CODEX skip_crs=$SKIP_CRS_CONFIG skip_no_proxy=$SKIP_NO_PROXY dry_run=$DRY_RUN log_level=$LOG_LEVEL"
+  log_debug "Proxy env: HTTP_PROXY=$(env_state HTTP_PROXY), HTTPS_PROXY=$(env_state HTTPS_PROXY), ALL_PROXY=$(env_state ALL_PROXY), NO_PROXY=$(env_state NO_PROXY), no_proxy=$(env_state no_proxy)"
+  log_trace "PATH: ${PATH:-not set}"
+}
+
 cleanup_legacy_path_block() {
   # Remove stale # >>> codex user paths >>> blocks
   # written by previous versions of this installer (pre-Homebrew era).
@@ -235,8 +351,52 @@ cleanup_legacy_path_block() {
   done
 }
 
+ensure_homebrew_node_path_profile() {
+  local node_bin="${ACTIVE_NODE_PREFIX%/}/bin"
+  local block_start="# >>> codex homebrew node path >>>"
+  local block_end="# <<< codex homebrew node path <<<"
+  local quoted_node_bin
+  quoted_node_bin="$(shell_single_quote "$node_bin")"
+
+  [[ -d "$node_bin" ]] || return 0
+
+  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    local tmp
+    touch "$rc_file"
+    tmp="$(mktemp)"
+
+    awk -v start="$block_start" -v end="$block_end" '
+      index($0, start) { inblock=1; next }
+      index($0, end)   { inblock=0; next }
+      !inblock { print }
+    ' "$rc_file" > "$tmp"
+
+    cat >> "$tmp" <<EOF
+
+$block_start
+_codex_node_bin=$quoted_node_bin
+PATH=":\$PATH:"
+PATH="\${PATH//:\$_codex_node_bin:/:}"
+PATH="\${PATH#:}"
+PATH="\${PATH%:}"
+if [[ -n "\$PATH" ]]; then
+  export PATH="\$_codex_node_bin:\$PATH"
+else
+  export PATH="\$_codex_node_bin"
+fi
+unset _codex_node_bin
+$block_end
+EOF
+
+    mv "$tmp" "$rc_file"
+  done
+
+  log_ok "Persisted Homebrew node@24 PATH in zsh/bash profile files: $node_bin"
+}
+
 install_brew_and_node() {
   local node_formula="node@24"
+  local node_prefix
   log_info "Installing Node.js 24 LTS via Homebrew (user-space, no sudo)..."
 
   if ! cmd_exists brew; then
@@ -265,27 +425,45 @@ install_brew_and_node() {
   log_info "Installing Node.js 24 LTS via Homebrew..."
   brew install "$node_formula"
 
-  local node_prefix
   node_prefix="$(brew --prefix "$node_formula")"
+  if [[ ! -x "$node_prefix/bin/node" || ! -x "$node_prefix/bin/npm" ]]; then
+    echo "[ERROR] Homebrew node@24 installed but node/npm were not found under: $node_prefix/bin" >&2
+    exit 1
+  fi
+
+  ACTIVE_NODE_PREFIX="$node_prefix"
+  ACTIVE_NPM_CMD="$node_prefix/bin/npm"
   export PATH="$node_prefix/bin:$PATH"
   hash -r
 
-  log_ok "Node.js: $(node -v)"
-  log_ok "npm: $(npm -v)"
+  log_ok "Node.js: $("$ACTIVE_NODE_PREFIX/bin/node" -v)"
+  log_ok "npm: $("$ACTIVE_NPM_CMD" -v)"
 }
 
 ensure_homebrew_node_active() {
   local node_formula="node@24"
   if ! cmd_exists brew; then
     install_brew_and_node
+    return 0
   fi
 
   local node_prefix
   if ! node_prefix="$(brew --prefix "$node_formula" 2>/dev/null)"; then
     install_brew_and_node
-    node_prefix="$(brew --prefix "$node_formula")"
+    return 0
   fi
 
+  if [[ ! -x "$node_prefix/bin/node" || ! -x "$node_prefix/bin/npm" ]]; then
+    brew install "$node_formula"
+  fi
+
+  if [[ ! -x "$node_prefix/bin/node" || ! -x "$node_prefix/bin/npm" ]]; then
+    echo "[ERROR] Homebrew node@24 is installed but node/npm were not found under: $node_prefix/bin" >&2
+    exit 1
+  fi
+
+  ACTIVE_NODE_PREFIX="$node_prefix"
+  ACTIVE_NPM_CMD="$node_prefix/bin/npm"
   export PATH="$node_prefix/bin:$PATH"
   hash -r
 }
@@ -300,17 +478,25 @@ is_supported_node_lts() {
 }
 
 ensure_node_npm() {
-  if cmd_exists node && cmd_exists npm && [[ "$FORCE_NODE_REINSTALL" -eq 0 ]]; then
-    if is_supported_node_lts; then
-      log_info "Using existing supported Node.js LTS and npm."
-      log_ok "Node.js: $(node -v)"
-      log_ok "npm: $(npm -v)"
-      return 0
-    fi
-    log_warn "Existing Node.js is not a supported LTS line: $(node -v). Installing Node.js 24 LTS."
+  if [[ "$FORCE_NODE_REINSTALL" -eq 1 ]]; then
+    install_brew_and_node
+  else
+    ensure_homebrew_node_active
   fi
 
-  install_brew_and_node
+  if [[ -z "$ACTIVE_NODE_PREFIX" || -z "$ACTIVE_NPM_CMD" || ! -x "$ACTIVE_NODE_PREFIX/bin/node" || ! -x "$ACTIVE_NPM_CMD" ]]; then
+    echo "[ERROR] Node.js/npm are not available after activating Homebrew node@24." >&2
+    exit 1
+  fi
+
+  if ! "$ACTIVE_NODE_PREFIX/bin/node" -p 'process.versions.node.split(".")[0]' 2>/dev/null | grep -qx '24'; then
+    echo "[ERROR] Active Homebrew node@24 is not Node.js 24: $("$ACTIVE_NODE_PREFIX/bin/node" -v)" >&2
+    exit 1
+  fi
+
+  log_info "Using Homebrew node@24 Node.js/npm."
+  log_ok "Node.js: $("$ACTIVE_NODE_PREFIX/bin/node" -v)"
+  log_ok "npm: $("$ACTIVE_NPM_CMD" -v)"
 }
 
 trim_trailing_slash() {
@@ -523,7 +709,7 @@ ensure_codex() {
   local npm_prefix npm_bin
   ensure_homebrew_node_active
 
-  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  npm_prefix="$ACTIVE_NODE_PREFIX"
   if [[ -z "$npm_prefix" ]]; then
     echo "[ERROR] Failed to resolve npm global prefix from Homebrew node@24." >&2
     exit 1
@@ -542,7 +728,7 @@ ensure_codex() {
 
   if [[ "$FORCE_CODEX_REINSTALL" -eq 1 ]]; then
     log_info "Force reinstall enabled: removing existing Codex CLI from Homebrew node@24 prefix..."
-    npm uninstall -g @openai/codex >/dev/null 2>&1 || true
+    "$ACTIVE_NPM_CMD" uninstall -g --prefix "$npm_prefix" @openai/codex >/dev/null 2>&1 || true
   else
     if [[ -x "$npm_bin/codex" ]]; then
       if "$npm_bin/codex" --version >/dev/null 2>&1; then
@@ -554,7 +740,7 @@ ensure_codex() {
   fi
 
   log_info "Installing Codex CLI to Homebrew node@24 prefix ($npm_prefix)..."
-  npm install -g @openai/codex
+  "$ACTIVE_NPM_CMD" install -g --prefix "$npm_prefix" @openai/codex
 
   if [[ -x "$npm_bin/codex" ]]; then
     log_ok "Codex CLI: $("$npm_bin/codex" --version)"
@@ -753,10 +939,14 @@ configure_crs() {
 
   mkdir -p "$codex_dir"
   if [[ "$clean_existing" -eq 1 ]]; then
-    log_info "Detected existing node/npm/codex; backing up old CRS configuration before regenerating..."
+    log_info "Detected existing node/npm/codex; creating temporary CRS backups before regenerating..."
   fi
-  backup_if_exists "$config_path"
-  backup_if_exists "$auth_path"
+  local backup_paths=()
+  local backup_path
+  backup_path="$(backup_if_exists "$config_path")"
+  [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
+  backup_path="$(backup_if_exists "$auth_path")"
+  [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
 
   cat > "$config_path" <<CFG
 model_provider = "crs"
@@ -801,6 +991,7 @@ AUTH
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"
   log_ok "Persisted CRS_OAI_KEY in zsh/bash profile files"
+  remove_crs_backups_after_success "${backup_paths[@]}"
 }
 
 configure_no_proxy() {
@@ -819,8 +1010,14 @@ configure_no_proxy() {
 }
 
 main() {
-  require_non_root
   require_macos
+  log_info "Starting one-click install for macOS Codex CLI package..."
+  print_preflight_summary
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log_ok "Dry run complete. No files, environment variables, packages, or PATH entries were changed."
+    return 0
+  fi
+  require_non_root
   initialize_ascii_safe_environment
 
   local clean_existing_config=0
@@ -828,7 +1025,6 @@ main() {
     clean_existing_config=1
   fi
 
-  log_info "Starting one-click install for macOS Codex CLI package..."
   ensure_node_npm
   if [[ "$REMOVE_SYSTEM_CODEX" -eq 1 ]]; then
     log_info "--remove-system-codex requested; checking system-level Codex CLI."
@@ -841,6 +1037,7 @@ main() {
 
   # Clean up legacy path blocks and env vars from pre-Homebrew installer versions.
   cleanup_legacy_path_block
+  ensure_homebrew_node_path_profile
   for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     remove_env_from_file "$rc_file" "NPM_CONFIG_PREFIX"
     remove_env_from_file "$rc_file" "NPM_CONFIG_CACHE"
