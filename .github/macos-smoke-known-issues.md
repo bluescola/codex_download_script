@@ -1,6 +1,6 @@
 # macOS Smoke Known Issues
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 Branch: `actions/macos-installer-smoke-crs2`
 
 ## Scope
@@ -45,6 +45,15 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Unauthenticated GitHub REST requests hit rate limits quickly.
 - Impact:
   deep log retrieval from the Actions API was slower than expected.
+
+### 5. `backup_if_exists()` exited the CRS2.0 config-only step when target files did not exist yet
+
+- Observed on 2026-06-01 while analyzing run `26718450860`.
+- Root cause:
+  `configure_crs()` captures `backup_if_exists "$config_path"` and `backup_if_exists "$auth_path"` inside command substitution while the script runs with `set -e`.
+  When the target file did not exist yet, `backup_if_exists()` fell through the `if [[ -f ... ]]` branch and returned non-zero, which terminated the whole step before the config write.
+- Fix:
+  make `backup_if_exists()` return success when there is nothing to back up.
 
 ## Current Workflow Intent
 

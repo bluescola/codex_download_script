@@ -159,7 +159,9 @@ backup_if_exists() {
     cp -f "$p" "$bkp"
     log_info "Backed up existing file: $bkp" >&2
     printf '%s\n' "$bkp"
+    return 0
   fi
+  return 0
 }
 
 remove_crs_backups_after_success() {
