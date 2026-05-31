@@ -96,6 +96,15 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   the config-only step now runs the installer under `bash -x` and emits a larger tail window on failure so the next run should show the exact command or branch that exits.
 
+### 11. Legacy `CRS_OAI_KEY` cleanup can still terminate the config-only step after successful file writes
+
+- Observed on 2026-06-01 in run `26719582470`.
+- Confirmed facts:
+  the trace now reaches `CRS config files written to disk.`
+  the remaining failure happens during the follow-up `unset CRS_OAI_KEY` cleanup stage.
+- Fix:
+  skip the `unset` when `CRS_OAI_KEY` is a readonly shell variable, instead of relying on `unset ... || true`.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:

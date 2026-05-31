@@ -164,6 +164,16 @@ backup_if_exists() {
   return 0
 }
 
+unset_shell_var_if_possible() {
+  local name="$1"
+  if readonly -p 2>/dev/null | grep -Fq " $name="; then
+    log_warn "Shell variable is readonly; skipping unset: $name"
+    return 0
+  fi
+  unset "$name" 2>/dev/null || true
+  return 0
+}
+
 remove_crs_backups_after_success() {
   local bkp
   for bkp in "$@"; do
@@ -320,7 +330,7 @@ clear_existing_crs_config() {
     backup_if_exists "$auth_path"
   fi
 
-  unset CRS_OAI_KEY || true
+  unset_shell_var_if_possible "CRS_OAI_KEY"
 }
 
 read_required() {
@@ -1145,7 +1155,7 @@ CFG
   printf '{\n  "OPENAI_API_KEY": "%s"\n}\n' "$escaped_openai_key" > "$auth_path"
   log_debug "CRS config files written to disk."
 
-  unset CRS_OAI_KEY || true
+  unset_shell_var_if_possible "CRS_OAI_KEY"
   for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     remove_env_from_file "$rc_file" "CRS_OAI_KEY"
   done
