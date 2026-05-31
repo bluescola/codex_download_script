@@ -8,6 +8,8 @@ SKIP_CRS_CONFIG=0
 SKIP_NO_PROXY=0
 DRY_RUN=0
 LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
+ACTIVE_NODE_PREFIX=""
+ACTIVE_NPM_CMD=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -351,6 +353,7 @@ cleanup_legacy_path_block() {
 
 install_brew_and_node() {
   local node_formula="node@24"
+  local node_prefix
   log_info "Installing Node.js 24 LTS via Homebrew (user-space, no sudo)..."
 
   if ! cmd_exists brew; then
@@ -379,27 +382,45 @@ install_brew_and_node() {
   log_info "Installing Node.js 24 LTS via Homebrew..."
   brew install "$node_formula"
 
-  local node_prefix
   node_prefix="$(brew --prefix "$node_formula")"
+  if [[ ! -x "$node_prefix/bin/node" || ! -x "$node_prefix/bin/npm" ]]; then
+    echo "[ERROR] Homebrew node@24 installed but node/npm were not found under: $node_prefix/bin" >&2
+    exit 1
+  fi
+
+  ACTIVE_NODE_PREFIX="$node_prefix"
+  ACTIVE_NPM_CMD="$node_prefix/bin/npm"
   export PATH="$node_prefix/bin:$PATH"
   hash -r
 
-  log_ok "Node.js: $(node -v)"
-  log_ok "npm: $(npm -v)"
+  log_ok "Node.js: $("$ACTIVE_NODE_PREFIX/bin/node" -v)"
+  log_ok "npm: $("$ACTIVE_NPM_CMD" -v)"
 }
 
 ensure_homebrew_node_active() {
   local node_formula="node@24"
   if ! cmd_exists brew; then
     install_brew_and_node
+    return 0
   fi
 
   local node_prefix
   if ! node_prefix="$(brew --prefix "$node_formula" 2>/dev/null)"; then
     install_brew_and_node
-    node_prefix="$(brew --prefix "$node_formula")"
+    return 0
   fi
 
+  if [[ ! -x "$node_prefix/bin/node" || ! -x "$node_prefix/bin/npm" ]]; then
+    brew install "$node_formula"
+  fi
+
+  if [[ ! -x "$node_prefix/bin/node" || ! -x "$node_prefix/bin/npm" ]]; then
+    echo "[ERROR] Homebrew node@24 is installed but node/npm were not found under: $node_prefix/bin" >&2
+    exit 1
+  fi
+
+  ACTIVE_NODE_PREFIX="$node_prefix"
+  ACTIVE_NPM_CMD="$node_prefix/bin/npm"
   export PATH="$node_prefix/bin:$PATH"
   hash -r
 }
@@ -420,19 +441,19 @@ ensure_node_npm() {
     ensure_homebrew_node_active
   fi
 
-  if ! cmd_exists node || ! cmd_exists npm; then
+  if [[ -z "$ACTIVE_NODE_PREFIX" || -z "$ACTIVE_NPM_CMD" || ! -x "$ACTIVE_NODE_PREFIX/bin/node" || ! -x "$ACTIVE_NPM_CMD" ]]; then
     echo "[ERROR] Node.js/npm are not available after activating Homebrew node@24." >&2
     exit 1
   fi
 
-  if ! is_supported_node_lts; then
-    echo "[ERROR] Active Node.js is not a supported LTS line after activating Homebrew node@24: $(node -v)" >&2
+  if ! "$ACTIVE_NODE_PREFIX/bin/node" -p 'process.versions.node.split(".")[0]' 2>/dev/null | grep -qx '24'; then
+    echo "[ERROR] Active Homebrew node@24 is not Node.js 24: $("$ACTIVE_NODE_PREFIX/bin/node" -v)" >&2
     exit 1
   fi
 
   log_info "Using Homebrew node@24 Node.js/npm."
-  log_ok "Node.js: $(node -v)"
-  log_ok "npm: $(npm -v)"
+  log_ok "Node.js: $("$ACTIVE_NODE_PREFIX/bin/node" -v)"
+  log_ok "npm: $("$ACTIVE_NPM_CMD" -v)"
 }
 
 trim_trailing_slash() {
@@ -645,7 +666,7 @@ ensure_codex() {
   local npm_prefix npm_bin
   ensure_homebrew_node_active
 
-  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  npm_prefix="$ACTIVE_NODE_PREFIX"
   if [[ -z "$npm_prefix" ]]; then
     echo "[ERROR] Failed to resolve npm global prefix from Homebrew node@24." >&2
     exit 1
@@ -664,7 +685,7 @@ ensure_codex() {
 
   if [[ "$FORCE_CODEX_REINSTALL" -eq 1 ]]; then
     log_info "Force reinstall enabled: removing existing Codex CLI from Homebrew node@24 prefix..."
-    npm uninstall -g @openai/codex >/dev/null 2>&1 || true
+    "$ACTIVE_NPM_CMD" uninstall -g --prefix "$npm_prefix" @openai/codex >/dev/null 2>&1 || true
   else
     if [[ -x "$npm_bin/codex" ]]; then
       if "$npm_bin/codex" --version >/dev/null 2>&1; then
@@ -676,7 +697,7 @@ ensure_codex() {
   fi
 
   log_info "Installing Codex CLI to Homebrew node@24 prefix ($npm_prefix)..."
-  npm install -g @openai/codex
+  "$ACTIVE_NPM_CMD" install -g --prefix "$npm_prefix" @openai/codex
 
   if [[ -x "$npm_bin/codex" ]]; then
     log_ok "Codex CLI: $("$npm_bin/codex" --version)"

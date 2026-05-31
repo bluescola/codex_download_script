@@ -39,6 +39,16 @@ jobs:
           cd "Codex-Mac-一键安装包"
           bash install-codex-cli-mac.sh --dry-run --verbose
 
+      - name: Inspect Homebrew node@24
+        shell: bash
+        run: |
+          brew --prefix node@24 || true
+          node24_prefix="$(brew --prefix node@24 2>/dev/null || true)"
+          if [ -n "$node24_prefix" ]; then
+            ls -la "$node24_prefix" || true
+            ls -la "$node24_prefix/bin" || true
+          fi
+
       - name: Install without CRS prompt
         shell: bash
         run: |
