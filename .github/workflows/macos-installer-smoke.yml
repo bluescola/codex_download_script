@@ -42,6 +42,12 @@ jobs:
 
       - name: Install with mocked CRS 2.0 endpoint
         shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          NONINTERACTIVE: "1"
+          CODEX_CRS_BASE_URL: "http://127.0.0.1:18080/api"
+          CODEX_CRS_OPENAI_API_KEY: "crs2-smoke-token"
         run: |
           set -euo pipefail
           cd "Codex-Mac-一键安装包"
@@ -102,10 +108,7 @@ jobs:
           done
           test "$status" = "200"
 
-          printf '%s\n%s\n' \
-            'http://127.0.0.1:18080/api' \
-            'crs2-smoke-token' \
-            | bash install-codex-cli-mac.sh --verbose
+          bash install-codex-cli-mac.sh --verbose
 
       - name: Verify commands and CRS 2.0 artifacts
         shell: bash
