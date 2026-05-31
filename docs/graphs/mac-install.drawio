@@ -40,7 +40,7 @@
         <mxCell id="system" value="系统级 Codex&lt;br&gt;默认告警 / 显式移除" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="900" y="665" width="270" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="cleanup" value="旧环境清理&lt;br&gt;旧 PATH block / NPM_CONFIG_*" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="cleanup" value="旧环境清理&lt;br&gt;PATH block / NPM_CONFIG_* / 默认 CODEX_HOME" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="60" y="825" width="230" height="80" as="geometry" />
         </mxCell>
         <mxCell id="nodepath" value="node@24 PATH&lt;br&gt;去重置顶写入 profile" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">

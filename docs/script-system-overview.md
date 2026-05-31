@@ -39,7 +39,7 @@
 5. 通过 nvm 安装或启用 Node.js LTS。
 6. 检查系统级 Codex：默认告警；传入 `--remove-system-codex` 才移除。
 7. 把 Codex 安装到 nvm npm prefix。
-8. 清理旧 PATH 块、旧 `NPM_CONFIG_*`，并在使用 nvm 前移除冲突的 npmrc `prefix/globalconfig`。
+8. 清理旧 PATH 块、旧 `NPM_CONFIG_*`，并在使用 nvm 前移除冲突的 npmrc `prefix/globalconfig` 和旧安装器 cache。
 9. 写入 CRS 配置和 `auth.json`。
 10. 调用 `setup_no_proxy_linux.sh` 写入 NO_PROXY/no_proxy。
 
@@ -51,9 +51,9 @@
 4. 检查已有 Node/npm/Codex，决定是否为旧 CRS 配置创建临时备份。
 5. 安装或复用 Homebrew，安装 `node@24`。
 6. 检查系统级 Codex：默认告警；传入 `--remove-system-codex` 才移除。
-7. 确认 `CODEX_HOME` profile 环境变量只在非默认目录时持久化。
+7. 清理旧安装器 npm 配置；`CODEX_HOME` profile 环境变量只在非默认目录时持久化。
 8. 把 Codex 安装到 Homebrew `node@24` npm prefix。
-9. 清理旧 PATH 块和旧 `NPM_CONFIG_*`，并把 `node@24/bin` 去重置顶写入 zsh/bash profile。
+9. 清理旧 PATH 块、旧 `NPM_CONFIG_*` 和默认 `CODEX_HOME`，并把 `node@24/bin` 去重置顶写入 zsh/bash profile。
 10. 写入 CRS 配置和 `auth.json`。
 11. 调用 `setup_no_proxy_mac.sh` 写入 shell profile 和 LaunchAgent。
 
@@ -113,7 +113,7 @@
 ## 维护边界
 
 - 只改对应平台脚本时，不要同步改另一个平台的行为，除非这是明确的跨平台决策。
-- 不要把 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 长期写入用户环境。
+- 不要把 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 长期写入用户环境；Windows 还要继续清理旧版本曾写入的 `NPM_CONFIG_USERCONFIG`。
 - Windows npm 安装必须继续显式传 `--prefix` 和 `--cache`。
 - Linux Codex 安装目标必须继续在 nvm prefix 下。
 - macOS Codex 安装目标必须继续在 Homebrew `node@24` prefix 下。

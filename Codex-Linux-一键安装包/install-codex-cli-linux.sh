@@ -37,6 +37,8 @@ else
   NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   CODEX_HOME_DIR="${HOME}/.codex"
 fi
+LEGACY_NPM_CACHE="$HOME/.npm-cache"
+LEGACY_ASCII_NPM_CACHE="${CODEX_UNIX_ROOT:+$CODEX_UNIX_ROOT/npm-cache}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -267,37 +269,49 @@ sanitize_npm_config_for_nvm() {
   local changed=0
   local npmrc="$HOME/.npmrc"
 
-  for name in PREFIX NPM_CONFIG_PREFIX npm_config_prefix NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig; do
+  for name in PREFIX NPM_CONFIG_PREFIX npm_config_prefix NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_CACHE npm_config_cache; do
     if [[ -n "${!name:-}" ]]; then
       unset "$name"
       changed=1
     fi
   done
 
-  if [[ -f "$npmrc" ]] && grep -qiE '^[[:space:]]*(prefix|globalconfig)[[:space:]]*=' "$npmrc"; then
-    local backup_path
-    backup_path="$(backup_if_exists "$npmrc")"
-    [[ -n "$backup_path" ]] && NPM_CONFIG_BACKUPS+=("$backup_path")
-
-    local tmp
+  if [[ -f "$npmrc" ]] && grep -qiE '^[[:space:]]*(prefix|globalconfig|cache)[[:space:]]*=' "$npmrc"; then
+    local backup_path tmp
     tmp="$(mktemp)"
-    awk '
+    awk -v legacy_cache="$LEGACY_NPM_CACHE" -v legacy_ascii_cache="$LEGACY_ASCII_NPM_CACHE" '
       {
         trimmed = $0
         sub(/^[[:space:]]+/, "", trimmed)
         if (tolower(trimmed) ~ /^(prefix|globalconfig)[[:space:]]*=/) {
           next
         }
+        if (tolower(trimmed) ~ /^cache[[:space:]]*=/) {
+          value = trimmed
+          sub(/^[^=]*=/, "", value)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+          gsub(/^"|"$/, "", value)
+          gsub(/^'\''|'\''$/, "", value)
+          if (value == legacy_cache || (legacy_ascii_cache != "" && value == legacy_ascii_cache)) {
+            next
+          }
+        }
         print
       }
     ' "$npmrc" > "$tmp"
-    mv "$tmp" "$npmrc"
-    log_warn "Removed nvm-incompatible prefix/globalconfig entries from ~/.npmrc."
-    changed=1
+    if cmp -s "$npmrc" "$tmp"; then
+      rm -f "$tmp"
+    else
+      backup_path="$(backup_if_exists "$npmrc")"
+      [[ -n "$backup_path" ]] && NPM_CONFIG_BACKUPS+=("$backup_path")
+      mv "$tmp" "$npmrc"
+      log_warn "Removed nvm-incompatible prefix/globalconfig entries and legacy installer cache entries from ~/.npmrc."
+      changed=1
+    fi
   fi
 
   if [[ "$changed" -eq 1 ]]; then
-    log_info "Sanitized npm prefix/globalconfig settings before using nvm."
+    log_info "Sanitized legacy npm environment/config settings before using nvm."
   fi
 
   return 0

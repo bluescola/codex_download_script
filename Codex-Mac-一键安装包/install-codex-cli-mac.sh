@@ -10,6 +10,7 @@ DRY_RUN=0
 LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
 ACTIVE_NODE_PREFIX=""
 ACTIVE_NPM_CMD=""
+NPM_CONFIG_BACKUPS=("")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -174,6 +175,19 @@ remove_crs_backups_after_success() {
   done
 }
 
+remove_npm_config_backups_after_success() {
+  local bkp
+  for bkp in "${NPM_CONFIG_BACKUPS[@]}"; do
+    if [[ -n "$bkp" && -e "$bkp" ]]; then
+      if rm -f "$bkp"; then
+        log_info "Removed successful npm config backup: $bkp"
+      else
+        log_warn "Failed to remove successful npm config backup: $bkp"
+      fi
+    fi
+  done
+}
+
 toml_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
@@ -182,6 +196,75 @@ shell_single_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
   printf "'"
+}
+
+sanitize_legacy_npm_config() {
+  local changed=0
+  local npmrc="$HOME/.npmrc"
+
+  for name in PREFIX NPM_CONFIG_PREFIX npm_config_prefix NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_CACHE npm_config_cache; do
+    if [[ -n "${!name:-}" ]]; then
+      unset "$name"
+      changed=1
+    fi
+  done
+
+  if [[ -f "$npmrc" ]] && grep -qiE '^[[:space:]]*(prefix|globalconfig|cache)[[:space:]]*=' "$npmrc"; then
+    local backup_path tmp
+    tmp="$(mktemp)"
+    awk \
+      -v legacy_prefix_global="$LEGACY_NPM_PREFIX_GLOBAL" \
+      -v legacy_prefix_local="$LEGACY_NPM_PREFIX_LOCAL" \
+      -v legacy_ascii_prefix="$LEGACY_ASCII_NPM_PREFIX" \
+      -v legacy_cache="$LEGACY_NPM_CACHE" \
+      -v legacy_ascii_cache="$LEGACY_ASCII_NPM_CACHE" '
+      {
+        trimmed = $0
+        sub(/^[[:space:]]+/, "", trimmed)
+        if (tolower(trimmed) ~ /^(prefix|globalconfig|cache)[[:space:]]*=/) {
+          key = tolower(trimmed)
+          sub(/[[:space:]]*=.*/, "", key)
+
+          value = trimmed
+          sub(/^[^=]*=/, "", value)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+          gsub(/^"|"$/, "", value)
+          gsub(/^'\''|'\''$/, "", value)
+
+          if ((key == "prefix" || key == "globalconfig") &&
+              (value == legacy_prefix_global ||
+               value == legacy_prefix_local ||
+               (legacy_ascii_prefix != "" && value == legacy_ascii_prefix) ||
+               value == legacy_prefix_global "/etc/npmrc" ||
+               value == legacy_prefix_local "/etc/npmrc" ||
+               (legacy_ascii_prefix != "" && value == legacy_ascii_prefix "/etc/npmrc"))) {
+            next
+          }
+          if (key == "cache" &&
+              (value == legacy_cache ||
+               (legacy_ascii_cache != "" && value == legacy_ascii_cache))) {
+            next
+          }
+        }
+        print
+      }
+    ' "$npmrc" > "$tmp"
+    if cmp -s "$npmrc" "$tmp"; then
+      rm -f "$tmp"
+    else
+      backup_path="$(backup_if_exists "$npmrc")"
+      [[ -n "$backup_path" ]] && NPM_CONFIG_BACKUPS+=("$backup_path")
+      mv "$tmp" "$npmrc"
+      log_warn "Removed legacy installer npm prefix/globalconfig/cache entries from ~/.npmrc."
+      changed=1
+    fi
+  fi
+
+  if [[ "$changed" -eq 1 ]]; then
+    log_info "Sanitized legacy npm environment/config settings before using Homebrew node@24."
+  fi
+
+  return 0
 }
 
 test_preexisting_node_npm() {
@@ -279,6 +362,11 @@ else
   CODEX_UNIX_ROOT=""
   CODEX_HOME_DIR="$HOME/.codex"
 fi
+LEGACY_NPM_PREFIX_GLOBAL="$HOME/.npm-global"
+LEGACY_NPM_PREFIX_LOCAL="$HOME/.local"
+LEGACY_ASCII_NPM_PREFIX="${CODEX_UNIX_ROOT:+$CODEX_UNIX_ROOT/npm}"
+LEGACY_NPM_CACHE="$HOME/.npm-cache"
+LEGACY_ASCII_NPM_CACHE="${CODEX_UNIX_ROOT:+$CODEX_UNIX_ROOT/npm-cache}"
 
 is_default_codex_home() {
   [[ "$CODEX_HOME_DIR" == "$HOME/.codex" ]]
@@ -423,7 +511,15 @@ install_brew_and_node() {
   fi
 
   log_info "Installing Node.js 24 LTS via Homebrew..."
-  brew install "$node_formula"
+  if ! brew install "$node_formula"; then
+    node_prefix="$(brew --prefix "$node_formula" 2>/dev/null || true)"
+    if [[ -n "$node_prefix" && -x "$node_prefix/bin/node" && -x "$node_prefix/bin/npm" ]]; then
+      log_warn "Homebrew reported a link conflict for node@24; continuing with keg binaries under: $node_prefix"
+    else
+      echo "[ERROR] Homebrew failed to install node@24." >&2
+      exit 1
+    fi
+  fi
 
   node_prefix="$(brew --prefix "$node_formula")"
   if [[ ! -x "$node_prefix/bin/node" || ! -x "$node_prefix/bin/npm" ]]; then
@@ -454,7 +550,14 @@ ensure_homebrew_node_active() {
   fi
 
   if [[ ! -x "$node_prefix/bin/node" || ! -x "$node_prefix/bin/npm" ]]; then
-    brew install "$node_formula"
+    if ! brew install "$node_formula"; then
+      if [[ -x "$node_prefix/bin/node" && -x "$node_prefix/bin/npm" ]]; then
+        log_warn "Homebrew reported a link conflict for node@24; continuing with keg binaries under: $node_prefix"
+      else
+        echo "[ERROR] Homebrew failed to install node@24." >&2
+        exit 1
+      fi
+    fi
   fi
 
   if [[ ! -x "$node_prefix/bin/node" || ! -x "$node_prefix/bin/npm" ]]; then
@@ -1019,6 +1122,7 @@ main() {
   fi
   require_non_root
   initialize_ascii_safe_environment
+  sanitize_legacy_npm_config
 
   local clean_existing_config=0
   if test_preexisting_node_npm_codex; then
@@ -1032,16 +1136,13 @@ main() {
   else
     warn_system_codex
   fi
-  ensure_codex_home_profile_env
   ensure_codex
 
   # Clean up legacy path blocks and env vars from pre-Homebrew installer versions.
   cleanup_legacy_path_block
   ensure_homebrew_node_path_profile
-  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
-    remove_env_from_file "$rc_file" "NPM_CONFIG_PREFIX"
-    remove_env_from_file "$rc_file" "NPM_CONFIG_CACHE"
-  done
+  cleanup_obsolete_profile_env
+  ensure_codex_home_profile_env
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
     configure_crs "$clean_existing_config"
@@ -1053,6 +1154,7 @@ main() {
 
   printf '\n'
   log_ok "Done."
+  remove_npm_config_backups_after_success
   log_info "If environment variables are not visible, open a new terminal or source the updated zsh/bash profile file."
 }
 

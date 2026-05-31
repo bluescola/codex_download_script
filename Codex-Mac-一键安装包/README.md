@@ -13,6 +13,7 @@ bash install-codex-cli-mac.sh
 - 开头打印 preflight 环境摘要，便于排查 Node/npm/Codex、Homebrew、路径和代理问题。
 - 使用 Homebrew `node@24` 作为明确 LTS 目标，并把 Codex 安装到 `node@24` npm prefix。
 - 将 `node@24/bin` 以去重方式放到 zsh/bash profile 的 PATH 前面，避免 keg-only `node@24` 被其它 Homebrew Node 覆盖。
+- 清理旧安装器写入的 npm prefix/cache 配置和默认 `CODEX_HOME` profile 导出。
 - 不长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`。
 - 写入 CRS 配置和 `auth.json`；写入失败时保留本次备份，成功后清理本次备份。
 - 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy，并覆盖终端和 GUI 会话。

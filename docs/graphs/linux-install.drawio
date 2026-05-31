@@ -25,7 +25,7 @@
         <mxCell id="nvm" value="nvm&lt;br&gt;安装或加载" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="360" y="515" width="220" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="npmrc" value="npmrc 清理&lt;br&gt;移除 prefix/globalconfig" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="npmrc" value="npmrc 清理&lt;br&gt;prefix/globalconfig / 旧 cache" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="360" y="610" width="220" height="65" as="geometry" />
         </mxCell>
         <mxCell id="node" value="Node.js LTS&lt;br&gt;nvm install --lts" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">

@@ -12,7 +12,7 @@ bash install-codex-cli-linux.sh
 
 - 开头打印 preflight 环境摘要，便于排查 Node/npm/Codex、nvm、路径和代理问题。
 - 通过 nvm 安装或启用 Node.js LTS，并把 Codex 安装到 nvm npm prefix。
-- 使用 nvm 前会清理当前进程和 `~/.npmrc` 中与 nvm 冲突的 `prefix/globalconfig`。
+- 使用 nvm 前会清理当前进程和 `~/.npmrc` 中与 nvm 冲突的 `prefix/globalconfig`，并移除旧安装器写入的 npm cache 配置。
 - 不长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`。
 - 写入 CRS 配置和 `auth.json`；写入失败时保留本次备份，成功后清理本次备份。
 - 调用 `setup_no_proxy_linux.sh` 合并 NO_PROXY/no_proxy。
