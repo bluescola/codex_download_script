@@ -1,0 +1,80 @@
+<mxfile host="app.diagrams.net" modified="2026-05-31T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="mac-install" name="macOS 安装流程图">
+    <mxGraphModel dx="1300" dy="820" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="macOS Codex 安装脚本流程框图" style="text;html=1;strokeColor=none;fillColor=none;fontSize=26;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="360" y="30" width="680" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="entry" value="install-codex-cli-mac.sh&lt;br&gt;主入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="570" y="95" width="240" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="args" value="参数解析&lt;br&gt;--dry-run / --verbose / --trace" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eef7e8;strokeColor=#72a85f;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="230" y="230" width="290" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="logging" value="logging.sh&lt;br&gt;共享日志模块" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eef7e8;strokeColor=#72a85f;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="850" y="230" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="preflight" value="Preflight&lt;br&gt;系统 / HOME / Homebrew / Node" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eef7e8;strokeColor=#72a85f;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="545" y="350" width="290" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="ascii" value="ASCII-safe 环境&lt;br&gt;/Users/Shared/Codex-&lt;uid&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="70" y="515" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="brew" value="Homebrew&lt;br&gt;安装或复用" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="390" y="515" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="node" value="node@24&lt;br&gt;明确 LTS 目标" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="660" y="515" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="prefix" value="npm prefix 校验&lt;br&gt;Homebrew node@24 prefix" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="950" y="515" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="codexhome" value="CODEX_HOME&lt;br&gt;非默认目录才持久化" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="100" y="665" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="codex" value="Codex CLI&lt;br&gt;npm install -g @openai/codex" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="500" y="665" width="290" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="system" value="系统级 Codex&lt;br&gt;默认告警 / 显式移除" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="900" y="665" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="cleanup" value="旧环境清理&lt;br&gt;旧 PATH block / NPM_CONFIG_*" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="60" y="825" width="230" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="nodepath" value="node@24 PATH&lt;br&gt;去重置顶写入 profile" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="60" y="920" width="230" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="crsbackup" value="CRS 临时备份&lt;br&gt;失败保留 / 成功后清理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="335" y="825" width="250" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="crs" value="CRS 配置&lt;br&gt;config.toml / auth.json" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="625" y="825" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="launch" value="LaunchAgent / launchctl&lt;br&gt;GUI 会话环境" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="910" y="825" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="noproxy" value="setup_no_proxy_mac.sh&lt;br&gt;NO_PROXY / no_proxy" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="825" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="entry" target="args"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#72a85f;strokeWidth=2;" edge="1" parent="1" source="logging" target="preflight"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="args" target="preflight"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="preflight" target="ascii"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="ascii" target="brew"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="brew" target="node"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="node" target="prefix"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="prefix" target="codex"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#c7a447;strokeWidth=2;" edge="1" parent="1" source="codexhome" target="codex"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="--remove-system-codex" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#c7a447;strokeWidth=2;dashed=1;" edge="1" parent="1" source="system" target="codex"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="codex" target="cleanup"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="cleanup" target="nodepath"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="crs" target="launch"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="launch" target="noproxy"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e15" value="写入前" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="crsbackup" target="crs"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="nodepath" target="crsbackup"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

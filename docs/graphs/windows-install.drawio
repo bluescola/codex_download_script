@@ -1,0 +1,122 @@
+<mxfile host="app.diagrams.net" modified="2026-05-31T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="windows-install" name="Windows 安装流程图">
+    <mxGraphModel dx="1200" dy="760" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Windows Codex 安装脚本流程框图" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="360" y="30" width="680" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cmd" value="install-codex-cli.cmd&lt;br&gt;双击入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="560" y="90" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="combo" value="install-codex-cli-and-setup-no-proxy.ps1&lt;br&gt;组合包装器" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="530" y="200" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="main" value="install-codex-cli.ps1&lt;br&gt;主安装脚本" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="330" y="330" width="230" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="noproxy" value="setup_no_proxy_windows.ps1&lt;br&gt;NO_PROXY 配置" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="780" y="330" width="250" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="logging" value="logging.ps1&lt;br&gt;共享日志模块" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eef7e8;strokeColor=#72a85f;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="80" y="205" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="preflight" value="Preflight&lt;br&gt;环境摘要 / dry-run" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eef7e8;strokeColor=#72a85f;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="80" y="330" width="220" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ascii" value="ASCII-safe 路径&lt;br&gt;C:\Codex / CODEX_HOME / ACL" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="80" y="480" width="250" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="node" value="Node.js LTS&lt;br&gt;下载 zip / SHA256 / 原子替换" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="380" y="480" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="codex" value="Codex CLI&lt;br&gt;npm install -g --prefix --cache" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="700" y="480" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="crs" value="CRS 配置&lt;br&gt;config.toml / auth.json / CRS_OAI_KEY" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="480" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="crsbackup" value="CRS 临时备份&lt;br&gt;失败保留 / 成功后清理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="575" width="270" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="path" value="用户 PATH&lt;br&gt;npm bin / Node 目录" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="380" y="630" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="probe" value="可用性探测&lt;br&gt;codex.cmd / PowerShell / -NoProfile" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="680" y="630" width="270" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="policy" value="执行策略修复&lt;br&gt;RemoteSigned / 禁用 codex.ps1 wrapper" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="690" width="270" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="repair" value="check-and-repair-codex-env.ps1&lt;br&gt;安装后修复入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9b6dd6;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="220" y="820" width="290" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="vc" value="install-vc-redist-x64.ps1&lt;br&gt;DLL 缺失修复入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9b6dd6;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="820" y="820" width="290" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="cmd" target="combo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="combo" target="main">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="安装后" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="combo" target="noproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#72a85f;strokeWidth=2;" edge="1" parent="1" source="logging" target="combo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#72a85f;strokeWidth=2;" edge="1" parent="1" source="logging" target="main">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#72a85f;strokeWidth=2;" edge="1" parent="1" source="preflight" target="main">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="main" target="ascii">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="ascii" target="node">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="node" target="codex">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="codex" target="crsbackup">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="node" target="path">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="codex" target="path">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="path" target="probe">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="需要时" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="probe" target="policy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="crs" target="noproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" value="修复 PATH/策略" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#9b6dd6;strokeWidth=2;dashed=1;" edge="1" parent="1" source="repair" target="probe">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" value="DLL 缺失" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#9b6dd6;strokeWidth=2;dashed=1;" edge="1" parent="1" source="vc" target="probe">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e18" value="写入前" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="crsbackup" target="crs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

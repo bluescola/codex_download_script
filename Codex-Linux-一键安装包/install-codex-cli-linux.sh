@@ -6,6 +6,10 @@ FORCE_CODEX_REINSTALL=0
 REMOVE_SYSTEM_CODEX=0
 SKIP_CRS_CONFIG=0
 SKIP_NO_PROXY=0
+DRY_RUN=0
+LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
+NPM_CONFIG_BACKUPS=()
+NVM_SAFE_STATUS=0
 
 contains_non_ascii() {
   local value="${1:-}"
@@ -56,6 +60,18 @@ while [[ $# -gt 0 ]]; do
       SKIP_NO_PROXY=1
       shift
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --verbose)
+      LOG_LEVEL="verbose"
+      shift
+      ;;
+    --trace)
+      LOG_LEVEL="trace"
+      shift
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage: install-codex-cli-linux.sh [options]
@@ -66,6 +82,9 @@ Options:
   --remove-system-codex    Explicitly remove system-level @openai/codex if detected
   --skip-crs-config        Skip interactive CRS config generation
   --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
+  --dry-run                Print preflight environment summary and exit without changes
+  --verbose                Print detailed diagnostic logs
+  --trace                  Print trace-level diagnostic logs
   -h, --help               Show this help
 USAGE
       exit 0
@@ -77,11 +96,87 @@ USAGE
   esac
 done
 
-log_info() { printf '[INFO] %s\n' "$*"; }
-log_warn() { printf '[WARN] %s\n' "$*"; }
-log_ok() { printf '[OK] %s\n' "$*"; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOGGING_MODULE="$REPO_ROOT/script-modules/logging/logging.sh"
+if [[ -f "$LOGGING_MODULE" ]]; then
+  # shellcheck source=../script-modules/logging/logging.sh
+  . "$LOGGING_MODULE"
+else
+  log_info() { printf '[INFO] %s\n' "$*"; }
+  log_warn() { printf '[WARN] %s\n' "$*"; }
+  log_ok() { printf '[OK] %s\n' "$*"; }
+  log_debug() {
+    case "$LOG_LEVEL" in
+      verbose|trace) printf '[DEBUG] %s\n' "$*" ;;
+    esac
+  }
+  log_trace() {
+    case "$LOG_LEVEL" in
+      trace) printf '[TRACE] %s\n' "$*" ;;
+    esac
+  }
+  codex_log_init() { CODEX_LOG_LEVEL="${1:-normal}"; }
+fi
+codex_log_init "$LOG_LEVEL"
 
 cmd_exists() { command -v "$1" >/dev/null 2>&1; }
+
+env_state() {
+  local name="$1"
+  if [[ -n "${!name:-}" ]]; then
+    printf 'set'
+  else
+    printf 'not set'
+  fi
+}
+
+command_path_or_none() {
+  command -v "$1" 2>/dev/null || printf 'not found'
+}
+
+command_version_or_none() {
+  local name="$1"
+  if ! cmd_exists "$name"; then
+    printf 'not available'
+    return 0
+  fi
+
+  case "$name" in
+    node|npm|codex)
+      "$name" --version 2>/dev/null | head -n 1 || printf 'not available'
+      ;;
+    *)
+      "$name" --version 2>/dev/null | head -n 1 || printf 'not available'
+      ;;
+  esac
+}
+
+print_preflight_summary() {
+  local npm_prefix npm_cache
+  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  npm_cache="$(npm config get cache 2>/dev/null || true)"
+
+  log_info "Preflight environment summary:"
+  log_info "  Platform: $(uname -s) $(uname -m)"
+  log_info "  User: $(id -un 2>/dev/null || printf 'unknown') (uid=$(id -u 2>/dev/null || printf 'unknown'))"
+  log_info "  HOME: ${HOME:-not set}"
+  log_info "  TMPDIR: ${TMPDIR:-not set}"
+  log_info "  ASCII-safe mode: $USE_ASCII_SAFE_PATHS"
+  if [[ -n "$CODEX_UNIX_ROOT" ]]; then
+    log_info "  ASCII Codex root: $CODEX_UNIX_ROOT"
+  fi
+  log_info "  NVM_DIR: $NVM_DIR"
+  log_info "  CODEX_HOME target: $CODEX_HOME_DIR"
+  log_info "  node: $(command_path_or_none node) ($(command_version_or_none node))"
+  log_info "  npm: $(command_path_or_none npm) ($(command_version_or_none npm))"
+  log_info "  codex: $(command_path_or_none codex) ($(command_version_or_none codex))"
+  log_info "  npm prefix: ${npm_prefix:-not available}"
+  log_debug "npm cache: ${npm_cache:-not available}"
+  log_debug "Options: force_node=$FORCE_NODE_REINSTALL force_codex=$FORCE_CODEX_REINSTALL remove_system=$REMOVE_SYSTEM_CODEX skip_crs=$SKIP_CRS_CONFIG skip_no_proxy=$SKIP_NO_PROXY dry_run=$DRY_RUN log_level=$LOG_LEVEL"
+  log_debug "Proxy env: HTTP_PROXY=$(env_state HTTP_PROXY), HTTPS_PROXY=$(env_state HTTPS_PROXY), ALL_PROXY=$(env_state ALL_PROXY), NO_PROXY=$(env_state NO_PROXY), no_proxy=$(env_state no_proxy)"
+  log_trace "PATH: ${PATH:-not set}"
+}
 
 require_linux() {
   if [[ "$(uname -s)" != "Linux" ]]; then
@@ -127,8 +222,35 @@ backup_if_exists() {
     ts="$(date +%Y%m%d-%H%M%S)"
     local bkp="${p}.bak.${ts}"
     cp -f "$p" "$bkp"
-    log_info "Backed up: $bkp"
+    log_info "Backed up existing file: $bkp" >&2
+    printf '%s\n' "$bkp"
   fi
+}
+
+remove_crs_backups_after_success() {
+  local bkp
+  for bkp in "$@"; do
+    if [[ -n "$bkp" && -e "$bkp" ]]; then
+      if rm -f "$bkp"; then
+        log_info "Removed successful-write backup: $bkp"
+      else
+        log_warn "Failed to remove successful-write backup: $bkp"
+      fi
+    fi
+  done
+}
+
+remove_npm_config_backups_after_success() {
+  local bkp
+  for bkp in "${NPM_CONFIG_BACKUPS[@]:-}"; do
+    if [[ -n "$bkp" && -e "$bkp" ]]; then
+      if rm -f "$bkp"; then
+        log_info "Removed successful npm config backup: $bkp"
+      else
+        log_warn "Failed to remove successful npm config backup: $bkp"
+      fi
+    fi
+  done
 }
 
 toml_escape() {
@@ -141,11 +263,135 @@ shell_single_quote() {
   printf "'"
 }
 
+sanitize_npm_config_for_nvm() {
+  local changed=0
+  local npmrc="$HOME/.npmrc"
+
+  for name in PREFIX NPM_CONFIG_PREFIX npm_config_prefix NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig; do
+    if [[ -n "${!name:-}" ]]; then
+      unset "$name"
+      changed=1
+    fi
+  done
+
+  if [[ -f "$npmrc" ]] && grep -qiE '^[[:space:]]*(prefix|globalconfig)[[:space:]]*=' "$npmrc"; then
+    local backup_path
+    backup_path="$(backup_if_exists "$npmrc")"
+    [[ -n "$backup_path" ]] && NPM_CONFIG_BACKUPS+=("$backup_path")
+
+    local tmp
+    tmp="$(mktemp)"
+    awk '
+      {
+        trimmed = $0
+        sub(/^[[:space:]]+/, "", trimmed)
+        if (tolower(trimmed) ~ /^(prefix|globalconfig)[[:space:]]*=/) {
+          next
+        }
+        print
+      }
+    ' "$npmrc" > "$tmp"
+    mv "$tmp" "$npmrc"
+    log_warn "Removed nvm-incompatible prefix/globalconfig entries from ~/.npmrc."
+    changed=1
+  fi
+
+  if [[ "$changed" -eq 1 ]]; then
+    log_info "Sanitized npm prefix/globalconfig settings before using nvm."
+  fi
+
+  return 0
+}
+
+load_nvm() {
+  [[ -s "$NVM_DIR/nvm.sh" ]] || return 1
+
+  local had_errexit=0
+  case "$-" in
+    *e*) had_errexit=1; set +e ;;
+  esac
+
+  # shellcheck source=/dev/null
+  . "$NVM_DIR/nvm.sh"
+  local source_status=$?
+
+  if [[ "$had_errexit" -eq 1 ]]; then
+    set -e
+  fi
+
+  if declare -F nvm >/dev/null 2>&1; then
+    return 0
+  fi
+
+  return "$source_status"
+}
+
+nvm_safe() {
+  local had_errexit=0
+  case "$-" in
+    *e*) had_errexit=1; set +e ;;
+  esac
+
+  nvm "$@"
+  NVM_SAFE_STATUS=$?
+
+  if [[ "$had_errexit" -eq 1 ]]; then
+    set -e
+  fi
+
+  return 0
+}
+
+use_existing_nvm_node() {
+  local node_bin
+  node_bin="$(find "$NVM_DIR/versions/node" -mindepth 3 -maxdepth 3 -type f -path '*/bin/node' 2>/dev/null | sort -V | tail -n 1 || true)"
+  if [[ -n "$node_bin" && -x "$node_bin" ]]; then
+    local node_bin_dir
+    node_bin_dir="$(dirname "$node_bin")"
+    export PATH="$node_bin_dir:$PATH"
+    hash -r
+    return 0
+  fi
+
+  return 1
+}
+
+activate_nvm_lts_with_nvm() {
+  load_nvm || return 1
+
+  nvm_safe use --silent default >/dev/null 2>&1
+  if [[ "$NVM_SAFE_STATUS" -ne 0 ]]; then
+    nvm_safe use --silent 'lts/*' >/dev/null 2>&1
+  fi
+
+  [[ "$NVM_SAFE_STATUS" -eq 0 ]]
+}
+
+ensure_nvm_default_alias() {
+  load_nvm || return 0
+
+  nvm_safe alias default 'lts/*' >/dev/null 2>&1
+  if [[ "$NVM_SAFE_STATUS" -ne 0 ]]; then
+    log_warn "Could not set nvm default alias to lts/*; current shell still uses the installed nvm Node."
+  fi
+
+  return 0
+}
+
+ensure_nvm_prefix_not_overridden() {
+  local npm_prefix
+  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  if [[ -n "$npm_prefix" ]] && ! path_under "$npm_prefix" "$NVM_DIR"; then
+    npm config delete prefix >/dev/null 2>&1 || true
+    npm config delete globalconfig >/dev/null 2>&1 || true
+  fi
+
+  return 0
+}
+
 test_preexisting_node_npm() {
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
-    # shellcheck source=/dev/null
-    \. "$NVM_DIR/nvm.sh"
-    if nvm use --silent default >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1; then
+    if use_existing_nvm_node; then
       return 0
     fi
   fi
@@ -233,6 +479,7 @@ read_secret_required() {
 install_nvm_and_node() {
   local nvm_install_url="https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh"
   export NVM_DIR
+  sanitize_npm_config_for_nvm
 
   if ! cmd_exists curl; then
     echo "[ERROR] curl is required to install nvm." >&2
@@ -251,17 +498,32 @@ install_nvm_and_node() {
     done
   fi
 
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  if ! load_nvm; then
+    echo "[ERROR] nvm was installed but could not be loaded from: $NVM_DIR/nvm.sh" >&2
+    exit 1
+  fi
 
   log_info "Installing Node.js LTS via nvm..."
-  nvm install --lts
-  nvm use --lts
-  nvm alias default 'lts/*'
+  nvm_safe install --lts
+  if [[ "$NVM_SAFE_STATUS" -ne 0 ]]; then
+    echo "[ERROR] nvm failed to install Node.js LTS." >&2
+    exit 1
+  fi
+  if ! use_existing_nvm_node && ! activate_nvm_lts_with_nvm; then
+    echo "[ERROR] nvm failed to activate Node.js LTS." >&2
+    exit 1
+  fi
+  nvm_safe alias default 'lts/*'
+  if [[ "$NVM_SAFE_STATUS" -ne 0 ]]; then
+    echo "[ERROR] nvm failed to set the default Node.js LTS alias." >&2
+    exit 1
+  fi
 
   local node_bin_dir
   node_bin_dir="$(dirname "$(which node)")"
   export PATH="$node_bin_dir:$PATH"
   hash -r
+  ensure_nvm_prefix_not_overridden
 
   log_ok "Node.js: $(node -v)"
   log_ok "npm: $(npm -v)"
@@ -270,11 +532,12 @@ install_nvm_and_node() {
 
 ensure_node_npm() {
   export NVM_DIR
+  sanitize_npm_config_for_nvm
 
   if [[ "$FORCE_NODE_REINSTALL" -eq 0 ]] && [[ -s "$NVM_DIR/nvm.sh" ]]; then
-    # shellcheck source=/dev/null
-    \. "$NVM_DIR/nvm.sh"
-    if nvm use --silent default >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1; then
+    if use_existing_nvm_node; then
+      ensure_nvm_default_alias
+      ensure_nvm_prefix_not_overridden
       log_info "Using Node.js/npm from nvm."
       log_ok "Node.js: $(node -v)"
       log_ok "npm: $(npm -v)"
@@ -287,20 +550,25 @@ ensure_node_npm() {
 
 ensure_nvm_node_active() {
   export NVM_DIR
+  sanitize_npm_config_for_nvm
+
   if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
     install_nvm_and_node
   fi
 
-  # shellcheck source=/dev/null
-  \. "$NVM_DIR/nvm.sh"
-  if nvm use --silent default >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1; then
+  if use_existing_nvm_node; then
+    ensure_nvm_default_alias
+    ensure_nvm_prefix_not_overridden
     return 0
   fi
 
   install_nvm_and_node
-  # shellcheck source=/dev/null
-  \. "$NVM_DIR/nvm.sh"
-  nvm use --silent default >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1
+  if ! use_existing_nvm_node && ! activate_nvm_lts_with_nvm; then
+    echo "[ERROR] Node.js/npm still not available from nvm after install." >&2
+    exit 1
+  fi
+  ensure_nvm_default_alias
+  ensure_nvm_prefix_not_overridden
 }
 
 cleanup_legacy_path_block() {
@@ -530,6 +798,74 @@ warn_system_codex() {
   log_warn "If you explicitly want to remove system-level Codex, rerun with --remove-system-codex."
 }
 
+remove_legacy_user_codex_path() {
+  local target="$1"
+  local prefix="$2"
+
+  if ! path_under "$target" "$prefix"; then
+    log_warn "Refusing to remove legacy Codex path outside npm prefix: $target"
+    return 1
+  fi
+
+  [[ -e "$target" || -L "$target" ]] || return 0
+
+  if [[ -d "$target" && ! -L "$target" ]]; then
+    rm -rf "$target"
+  else
+    rm -f "$target"
+  fi
+}
+
+cleanup_legacy_user_codex() {
+  local nvm_prefix="$1"
+  local cmd_path prefix package_dir removed=0
+  local legacy_prefixes=()
+
+  while IFS= read -r cmd_path; do
+    [[ -n "$cmd_path" ]] || continue
+    path_under "$cmd_path" "$nvm_prefix" && continue
+    path_under "$cmd_path" "$HOME" || continue
+    [[ "$cmd_path" == */bin/codex ]] || continue
+
+    prefix="${cmd_path%/bin/codex}"
+    [[ "$prefix" != "$nvm_prefix" ]] || continue
+    package_dir="$prefix/lib/node_modules/@openai/codex"
+    [[ -e "$package_dir" || -L "$package_dir" ]] || continue
+
+    log_info "Removing legacy user-level Codex outside nvm prefix: $prefix"
+    if npm uninstall -g --prefix "$prefix" @openai/codex >/dev/null 2>&1; then
+      removed=1
+    else
+      remove_legacy_user_codex_path "$cmd_path" "$prefix" || true
+      remove_legacy_user_codex_path "$package_dir" "$prefix" || true
+      removed=1
+    fi
+  done < <(type -P -a codex 2>/dev/null || true)
+
+  legacy_prefixes+=("$HOME/.npm-global")
+  for prefix in "${legacy_prefixes[@]}"; do
+    [[ -n "$prefix" ]] || continue
+    [[ "$prefix" != "$nvm_prefix" ]] || continue
+    path_under "$prefix" "$HOME" || continue
+    package_dir="$prefix/lib/node_modules/@openai/codex"
+    cmd_path="$prefix/bin/codex"
+    [[ -e "$package_dir" || -L "$package_dir" || -e "$cmd_path" || -L "$cmd_path" ]] || continue
+
+    log_info "Removing legacy user-level Codex outside nvm prefix: $prefix"
+    if npm uninstall -g --prefix "$prefix" @openai/codex >/dev/null 2>&1; then
+      removed=1
+    else
+      remove_legacy_user_codex_path "$cmd_path" "$prefix" || true
+      remove_legacy_user_codex_path "$package_dir" "$prefix" || true
+      removed=1
+    fi
+  done
+
+  if [[ "$removed" -eq 1 ]]; then
+    hash -r
+  fi
+}
+
 ensure_codex() {
   local npm_prefix npm_bin
   ensure_nvm_node_active
@@ -553,6 +889,7 @@ ensure_codex() {
     if [[ -x "$npm_bin/codex" ]]; then
       if "$npm_bin/codex" --version >/dev/null 2>&1; then
         log_info "Codex CLI already installed in nvm Node.js prefix: $("$npm_bin/codex" --version)"
+        cleanup_legacy_user_codex "$npm_prefix"
         return 0
       fi
       log_warn "codex exists in nvm Node.js prefix but failed to run; will reinstall."
@@ -570,6 +907,7 @@ ensure_codex() {
   npm_bin="${npm_prefix%/}/bin"
   if [[ -x "$npm_bin/codex" ]]; then
     log_ok "Codex CLI: $($npm_bin/codex --version)"
+    cleanup_legacy_user_codex "$npm_prefix"
   else
     echo "[ERROR] codex command not found under npm prefix after installation." >&2
     exit 1
@@ -744,10 +1082,14 @@ configure_crs() {
 
   mkdir -p "$codex_dir"
   if [[ "$clean_existing" -eq 1 ]]; then
-    log_info "Detected existing node/npm/codex; backing up old CRS configuration before regenerating..."
+    log_info "Detected existing node/npm/codex; creating temporary CRS backups before regenerating..."
   fi
-  backup_if_exists "$config_path"
-  backup_if_exists "$auth_path"
+  local backup_paths=()
+  local backup_path
+  backup_path="$(backup_if_exists "$config_path")"
+  [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
+  backup_path="$(backup_if_exists "$auth_path")"
+  [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
 
   cat > "$config_path" <<CFG
 model_provider = "crs"
@@ -804,6 +1146,8 @@ AUTH
   else
     log_ok "Persisted CRS_OAI_KEY in ~/.bashrc and ~/.zshrc"
   fi
+
+  remove_crs_backups_after_success "${backup_paths[@]}"
 }
 
 configure_no_proxy() {
@@ -823,15 +1167,21 @@ configure_no_proxy() {
 
 main() {
   require_linux
+  log_info "Starting one-click install for Linux Codex CLI package..."
+  print_preflight_summary
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log_ok "Dry run complete. No files, environment variables, packages, or PATH entries were changed."
+    return 0
+  fi
   require_non_root
   initialize_ascii_safe_environment
+  sanitize_npm_config_for_nvm
 
   local clean_existing_config=0
   if test_preexisting_node_npm_codex; then
     clean_existing_config=1
   fi
 
-  log_info "Starting one-click install for Linux Codex CLI package..."
   ensure_node_npm
   if [[ "$REMOVE_SYSTEM_CODEX" -eq 1 ]]; then
     log_info "--remove-system-codex requested; checking system-level Codex CLI."
@@ -855,6 +1205,8 @@ main() {
   if [[ "$SKIP_NO_PROXY" -eq 0 ]]; then
     configure_no_proxy
   fi
+
+  remove_npm_config_backups_after_success
 
   printf '\n'
   log_ok "Done."
