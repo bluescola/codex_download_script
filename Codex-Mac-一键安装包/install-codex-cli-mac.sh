@@ -6,6 +6,8 @@ FORCE_CODEX_REINSTALL=0
 REMOVE_SYSTEM_CODEX=0
 SKIP_CRS_CONFIG=0
 SKIP_NO_PROXY=0
+DRY_RUN=0
+LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,6 +31,18 @@ while [[ $# -gt 0 ]]; do
       SKIP_NO_PROXY=1
       shift
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --verbose)
+      LOG_LEVEL="verbose"
+      shift
+      ;;
+    --trace)
+      LOG_LEVEL="trace"
+      shift
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage: install-codex-cli-mac.sh [options]
@@ -39,6 +53,9 @@ Options:
   --remove-system-codex    Explicitly remove system-level @openai/codex if detected
   --skip-crs-config        Skip interactive CRS config generation
   --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
+  --dry-run                Print preflight environment summary and exit without changes
+  --verbose                Print detailed diagnostic logs
+  --trace                  Print trace-level diagnostic logs
   -h, --help               Show this help
 USAGE
       exit 0
@@ -50,11 +67,61 @@ USAGE
   esac
 done
 
-log_info() { printf '[INFO] %s\n' "$*"; }
-log_warn() { printf '[WARN] %s\n' "$*"; }
-log_ok() { printf '[OK] %s\n' "$*"; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOGGING_MODULE="$REPO_ROOT/script-modules/logging/logging.sh"
+if [[ -f "$LOGGING_MODULE" ]]; then
+  # shellcheck source=../script-modules/logging/logging.sh
+  . "$LOGGING_MODULE"
+else
+  log_info() { printf '[INFO] %s\n' "$*"; }
+  log_warn() { printf '[WARN] %s\n' "$*"; }
+  log_ok() { printf '[OK] %s\n' "$*"; }
+  log_debug() {
+    case "$LOG_LEVEL" in
+      verbose|trace) printf '[DEBUG] %s\n' "$*" ;;
+    esac
+  }
+  log_trace() {
+    case "$LOG_LEVEL" in
+      trace) printf '[TRACE] %s\n' "$*" ;;
+    esac
+  }
+  codex_log_init() { CODEX_LOG_LEVEL="${1:-normal}"; }
+fi
+codex_log_init "$LOG_LEVEL"
 
 cmd_exists() { command -v "$1" >/dev/null 2>&1; }
+
+env_state() {
+  local name="$1"
+  if [[ -n "${!name:-}" ]]; then
+    printf 'set'
+  else
+    printf 'not set'
+  fi
+}
+
+command_path_or_none() {
+  command -v "$1" 2>/dev/null || printf 'not found'
+}
+
+command_version_or_none() {
+  local name="$1"
+  if ! cmd_exists "$name"; then
+    printf 'not available'
+    return 0
+  fi
+
+  case "$name" in
+    node|npm|codex)
+      "$name" --version 2>/dev/null | head -n 1 || printf 'not available'
+      ;;
+    *)
+      "$name" --version 2>/dev/null | head -n 1 || printf 'not available'
+      ;;
+  esac
+}
 
 contains_non_ascii() {
   local value="${1:-}"
@@ -87,8 +154,22 @@ backup_if_exists() {
     ts="$(date +%Y%m%d-%H%M%S)"
     local bkp="${p}.bak.${ts}"
     cp -f "$p" "$bkp"
-    log_info "Backed up: $bkp"
+    log_info "Backed up existing file: $bkp" >&2
+    printf '%s\n' "$bkp"
   fi
+}
+
+remove_crs_backups_after_success() {
+  local bkp
+  for bkp in "$@"; do
+    if [[ -n "$bkp" && -e "$bkp" ]]; then
+      if rm -f "$bkp"; then
+        log_info "Removed successful-write backup: $bkp"
+      else
+        log_warn "Failed to remove successful-write backup: $bkp"
+      fi
+    fi
+  done
 }
 
 toml_escape() {
@@ -212,6 +293,39 @@ initialize_ascii_safe_environment() {
   mkdir -p "$CODEX_UNIX_ROOT" "$CODEX_HOME_DIR"
   chmod 700 "$CODEX_UNIX_ROOT" 2>/dev/null || true
   export CODEX_HOME="$CODEX_HOME_DIR"
+}
+
+print_preflight_summary() {
+  local npm_prefix npm_cache brew_path node24_prefix
+  npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+  npm_cache="$(npm config get cache 2>/dev/null || true)"
+  brew_path="$(command -v brew 2>/dev/null || true)"
+  if [[ -n "$brew_path" ]]; then
+    node24_prefix="$(brew --prefix node@24 2>/dev/null || true)"
+  else
+    node24_prefix=""
+  fi
+
+  log_info "Preflight environment summary:"
+  log_info "  Platform: $(uname -s) $(uname -m)"
+  log_info "  User: $(id -un 2>/dev/null || printf 'unknown') (uid=$(id -u 2>/dev/null || printf 'unknown'))"
+  log_info "  HOME: ${HOME:-not set}"
+  log_info "  TMPDIR: ${TMPDIR:-not set}"
+  log_info "  ASCII-safe mode: $USE_ASCII_SAFE_PATHS"
+  if [[ -n "$CODEX_UNIX_ROOT" ]]; then
+    log_info "  ASCII Codex root: $CODEX_UNIX_ROOT"
+  fi
+  log_info "  CODEX_HOME target: $CODEX_HOME_DIR"
+  log_info "  Homebrew: ${brew_path:-not found}"
+  log_info "  Homebrew node@24 prefix: ${node24_prefix:-not installed or not available}"
+  log_info "  node: $(command_path_or_none node) ($(command_version_or_none node))"
+  log_info "  npm: $(command_path_or_none npm) ($(command_version_or_none npm))"
+  log_info "  codex: $(command_path_or_none codex) ($(command_version_or_none codex))"
+  log_info "  npm prefix: ${npm_prefix:-not available}"
+  log_debug "npm cache: ${npm_cache:-not available}"
+  log_debug "Options: force_node=$FORCE_NODE_REINSTALL force_codex=$FORCE_CODEX_REINSTALL remove_system=$REMOVE_SYSTEM_CODEX skip_crs=$SKIP_CRS_CONFIG skip_no_proxy=$SKIP_NO_PROXY dry_run=$DRY_RUN log_level=$LOG_LEVEL"
+  log_debug "Proxy env: HTTP_PROXY=$(env_state HTTP_PROXY), HTTPS_PROXY=$(env_state HTTPS_PROXY), ALL_PROXY=$(env_state ALL_PROXY), NO_PROXY=$(env_state NO_PROXY), no_proxy=$(env_state no_proxy)"
+  log_trace "PATH: ${PATH:-not set}"
 }
 
 cleanup_legacy_path_block() {
@@ -753,10 +867,14 @@ configure_crs() {
 
   mkdir -p "$codex_dir"
   if [[ "$clean_existing" -eq 1 ]]; then
-    log_info "Detected existing node/npm/codex; backing up old CRS configuration before regenerating..."
+    log_info "Detected existing node/npm/codex; creating temporary CRS backups before regenerating..."
   fi
-  backup_if_exists "$config_path"
-  backup_if_exists "$auth_path"
+  local backup_paths=()
+  local backup_path
+  backup_path="$(backup_if_exists "$config_path")"
+  [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
+  backup_path="$(backup_if_exists "$auth_path")"
+  [[ -n "$backup_path" ]] && backup_paths+=("$backup_path")
 
   cat > "$config_path" <<CFG
 model_provider = "crs"
@@ -801,6 +919,7 @@ AUTH
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"
   log_ok "Persisted CRS_OAI_KEY in zsh/bash profile files"
+  remove_crs_backups_after_success "${backup_paths[@]}"
 }
 
 configure_no_proxy() {
@@ -819,8 +938,14 @@ configure_no_proxy() {
 }
 
 main() {
-  require_non_root
   require_macos
+  log_info "Starting one-click install for macOS Codex CLI package..."
+  print_preflight_summary
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log_ok "Dry run complete. No files, environment variables, packages, or PATH entries were changed."
+    return 0
+  fi
+  require_non_root
   initialize_ascii_safe_environment
 
   local clean_existing_config=0
@@ -828,7 +953,6 @@ main() {
     clean_existing_config=1
   fi
 
-  log_info "Starting one-click install for macOS Codex CLI package..."
   ensure_node_npm
   if [[ "$REMOVE_SYSTEM_CODEX" -eq 1 ]]; then
     log_info "--remove-system-codex requested; checking system-level Codex CLI."
