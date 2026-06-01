@@ -137,6 +137,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   verify now resolves command paths, versions, auth token, and PATH counts into explicit variables first, then validates them with labeled assertions so the next run exposes the concrete failing check.
 
+### 16. Sourcing shell profile files under `set -u` is fragile on GitHub macOS runners
+
+- Observed on 2026-06-01 while iterating after run `26730939122`.
+- Rationale:
+  the verify step sources `~/.zprofile`, `~/.zshrc`, `~/.bash_profile`, and `~/.bashrc` to emulate a fresh terminal, but runner or user profile code can reference unset variables that immediately terminate the shell under `nounset`.
+- Current mitigation in the smoke branch:
+  verify now temporarily disables `nounset` while loading profile files, then restores it before running the actual smoke assertions.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:

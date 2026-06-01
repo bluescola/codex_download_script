@@ -288,11 +288,16 @@ jobs:
             fi
           }
 
+          set +u
           source ~/.zprofile 2>/dev/null || true
           source ~/.zshrc 2>/dev/null || true
           source ~/.bash_profile 2>/dev/null || true
           source ~/.bashrc 2>/dev/null || true
+          set -u
           node24_prefix="$(brew --prefix node@24)"
+          echo "PATH after profile load: $PATH"
+          echo "NO_PROXY after profile load: ${NO_PROXY:-}"
+          echo "no_proxy after profile load: ${no_proxy:-}"
           codex_home="${CODEX_SMOKE_HOME:-}"
           if [[ -z "$codex_home" && -f "$GITHUB_WORKSPACE/.codex-smoke-home" ]]; then
             codex_home="$(tr -d '\r' < "$GITHUB_WORKSPACE/.codex-smoke-home")"
