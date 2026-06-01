@@ -70,7 +70,9 @@ CODEX_NPM_PREFIX="$HOME/.local"
 npm update -g @openai/codex
 ```
 
-若提示 `codex: command not found`，请重开终端，或确认用户 npm bin（如 `~/.local/bin`）已加入 `PATH`。只需要持久化 PATH 和用户级 npm `prefix`，不要把 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 写入 `~/.zshrc`、`~/.zprofile` 或 `~/.bash_profile`。
+若提示 `codex: command not found`，请重开终端，或确认用户 npm bin（如 `~/.local/bin`）已加入 `PATH`。只需要持久化 PATH 和用户级 npm `prefix`，不要把 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 写入 shell profile。
+
+一键安装包持久化 PATH、`CODEX_HOME`、`CRS_OAI_KEY` 和 NO_PROXY/no_proxy 时，默认只写登录 shell 对应 profile：登录 shell 是 zsh 时写 `~/.zprofile`、`~/.zshrc`，登录 shell 是 bash 时写 `~/.bash_profile`、`~/.bashrc`。不提供自定义写入范围开关，也不会为了兼容而同时写两套 shell profile。
 
 ### NO_PROXY/no_proxy 说明
 
@@ -199,7 +201,7 @@ nano ~/.codex/auth.json
 
 #### 方法 1: 永久设置（推荐）
 
-macOS 默认 shell 通常为 zsh，推荐写入 `~/.zshrc`：
+macOS 默认 shell 通常为 zsh。手工配置时，zsh 用户推荐写入 `~/.zprofile` 或 `~/.zshrc`；bash 用户写入 `~/.bash_profile` 或 `~/.bashrc`。不要同时写入两套 shell profile，除非你明确同时使用 zsh 和 bash。
 
 ```bash
 # 编辑 zshrc
@@ -231,7 +233,7 @@ source ~/.zshrc
 echo $CRS_OAI_KEY
 ```
 
-> 如果你使用的是 bash，请优先写入 `~/.bash_profile`；也可以让 `~/.bash_profile` source `~/.bashrc`。
+> 如果你使用的是 bash，请优先写入 `~/.bash_profile`；也可以让 `~/.bash_profile` source `~/.bashrc`。一键安装包默认只按登录 shell 写入，不会同时写 zsh/bash。
 
 #### 方法 2: 临时设置
 
@@ -293,8 +295,8 @@ codex "写一个 Python 函数计算斐波那契数列"
 ```
 □ ~/.codex/config.toml 已创建并配置正确的 base_url
 □ ~/.codex/auth.json 已创建并设置 OPENAI_API_KEY 为 null
-□ 环境变量 CRS_OAI_KEY 已添加到 ~/.zshrc / ~/.zprofile（bash 则为 ~/.bash_profile）
-□ 执行 source ~/.zshrc（bash 则 source ~/.bash_profile）加载环境变量
+□ 环境变量 CRS_OAI_KEY 已添加到登录 shell 对应 profile（zsh: ~/.zprofile 或 ~/.zshrc；bash: ~/.bash_profile 或 ~/.bashrc）
+□ 执行 source 登录 shell 对应 profile 加载环境变量
 □ echo $CRS_OAI_KEY 显示正确的 API Key
 □ codex "Hello" 测试成功
 ```
@@ -377,15 +379,15 @@ model_reasoning_effort = "medium"
 
 ### Q3: 每次打开新终端都需要重新设置环境变量
 
-**原因**：环境变量未正确添加到 `~/.zshrc`（或 `~/.bashrc`）
+**原因**：环境变量未正确添加到登录 shell 对应 profile。
 
 **解决方法**：
 
 1. 确认 rc 文件中有以下内容：
    ```bash
-   grep -n "CRS_OAI_KEY" ~/.zshrc ~/.bashrc 2>/dev/null || true
+   grep -n "CRS_OAI_KEY" ~/.zprofile ~/.zshrc ~/.bash_profile ~/.bashrc 2>/dev/null || true
    ```
-2. 如果没有，重新添加并 `source` 对应文件。
+2. 如果没有，重新添加到登录 shell 对应 profile 并 `source` 对应文件。
 
 ---
 
@@ -415,7 +417,8 @@ echo "问题" | codex
 ├── auth.json         # 认证配置（设为 null）
 └── ...               # 其他自动生成的文件
 
-~/.zshrc 或 ~/.bashrc # 环境变量（CRS_OAI_KEY）
+~/.zprofile / ~/.zshrc           # zsh 环境变量（CRS_OAI_KEY）
+~/.bash_profile / ~/.bashrc      # bash 环境变量（仅登录 shell 为 bash 时）
 ```
 
 ---
@@ -446,9 +449,11 @@ echo "问题" | codex
 ### 2. `~/.codex/auth.json`
 - 设置 `"OPENAI_API_KEY": null`
 
-### 3. `~/.zshrc`（或 `~/.bashrc`）
+### 3. 登录 shell 对应 profile
+- zsh：写入 `~/.zprofile` 或 `~/.zshrc`
+- bash：写入 `~/.bash_profile` 或 `~/.bashrc`
 - 添加 `export CRS_OAI_KEY="你的密钥"`
-- 执行 `source ~/.zshrc`（或 `source ~/.bashrc`）加载
+- 执行 `source` 对应 profile 加载
 
 ---
 

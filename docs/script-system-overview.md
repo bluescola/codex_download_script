@@ -53,9 +53,9 @@
 6. 检查系统级 Codex：默认告警；传入 `--remove-system-codex` 才移除。
 7. 清理旧安装器 npm 配置；`CODEX_HOME` profile 环境变量只在非默认目录时持久化。
 8. 把 Codex 安装到用户 npm prefix（如 `~/.local`，非 ASCII 场景使用 ASCII-safe prefix），后续更新无需 `sudo`。
-9. 清理旧 PATH 块、旧 `NPM_CONFIG_*` 和默认 `CODEX_HOME`；持久化用户 npm prefix 与必要 PATH（用户 npm bin，本次通过 Homebrew 安装 Node 时包含 Homebrew Node bin）。
+9. 清理旧 PATH 块、旧 `NPM_CONFIG_*` 和默认 `CODEX_HOME`；按登录 shell 持久化用户 npm prefix 与必要 PATH（用户 npm bin，本次通过 Homebrew 安装 Node 时包含 Homebrew Node bin）。
 10. 写入 CRS 配置和 `auth.json`。
-11. 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy，并写入 shell profile 和 LaunchAgent。
+11. 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy，并按登录 shell 写入 shell profile，同时通过 LaunchAgent 覆盖 GUI 会话。
 
 ### Windows
 
@@ -99,8 +99,14 @@
 平台差异：
 
 - Linux 写 shell profile 和 `~/.config/environment.d/99-codex-no-proxy.conf`。
-- macOS 写 zsh/bash profile，并通过 `launchctl` 和 LaunchAgent 覆盖 GUI 会话。
+- macOS 默认只写登录 shell 对应 profile：登录 shell 是 zsh 时写 `~/.zprofile`、`~/.zshrc`，登录 shell 是 bash 时写 `~/.bash_profile`、`~/.bashrc`。
 - Windows 写 User 环境变量，更新当前进程，并广播环境变更。
+
+macOS profile 写入维护规则：
+
+- 默认按登录 shell 选择 profile，不为了兼容而同时写 zsh/bash。
+- 不提供自定义写入范围开关，避免把测试或兼容策略变成用户侧长期配置。
+- 旧脚本标记块可以被清理，但清理旧块不应导致默认向另一个 shell 追加新配置。
 
 ## 日志级别
 

@@ -197,28 +197,67 @@ shell_single_quote() {
   printf "'"
 }
 
-profile_files_for_persist() {
-  local files=("$HOME/.zprofile" "$HOME/.zshrc")
-  local f seen=""
+detect_login_shell() {
+  local detected=""
+  if cmd_exists dscl; then
+    detected="$(dscl . -read "/Users/$(id -un)" UserShell 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
+  fi
+  if [[ -z "$detected" ]]; then
+    detected="${SHELL:-}"
+  fi
+  if [[ -z "$detected" ]]; then
+    detected="/bin/zsh"
+  fi
+  printf '%s\n' "$detected"
+}
 
-  case "${SHELL:-}" in
-    */bash)
-      files+=("$HOME/.bash_profile" "$HOME/.bashrc")
+profile_shell_kind_from_path() {
+  local shell_path="$1"
+  case "$(basename "$shell_path")" in
+    bash)
+      printf 'bash\n'
+      ;;
+    *)
+      printf 'zsh\n'
       ;;
   esac
+}
 
-  [[ -f "$HOME/.bash_profile" ]] && files+=("$HOME/.bash_profile")
-  [[ -f "$HOME/.bashrc" ]] && files+=("$HOME/.bashrc")
+profile_shell_kind() {
+  profile_shell_kind_from_path "$(detect_login_shell)"
+}
 
-  for f in "${files[@]}"; do
-    case ":$seen:" in
-      *":$f:"*) ;;
-      *)
-        printf '%s\n' "$f"
-        seen="${seen}:$f"
-        ;;
-    esac
-  done
+profile_files_label() {
+  case "$(profile_shell_kind)" in
+    bash)
+      printf 'bash profile files'
+      ;;
+    *)
+      printf 'zsh profile files'
+      ;;
+  esac
+}
+
+profile_source_hint() {
+  case "$(profile_shell_kind)" in
+    bash)
+      printf 'source ~/.bash_profile or source ~/.bashrc'
+      ;;
+    *)
+      printf 'source ~/.zprofile or source ~/.zshrc'
+      ;;
+  esac
+}
+
+profile_files_for_persist() {
+  case "$(profile_shell_kind)" in
+    bash)
+      printf '%s\n' "$HOME/.bash_profile" "$HOME/.bashrc"
+      ;;
+    *)
+      printf '%s\n' "$HOME/.zprofile" "$HOME/.zshrc"
+      ;;
+  esac
 }
 
 sanitize_legacy_npm_config() {
@@ -439,6 +478,8 @@ print_preflight_summary() {
   log_info "  npm: $(command_path_or_none npm) ($(command_version_or_none npm))"
   log_info "  codex: $(command_path_or_none codex) ($(command_version_or_none codex))"
   log_info "  npm prefix: ${npm_prefix:-not available}"
+  log_info "  login shell: $(detect_login_shell)"
+  log_info "  shell profile target: $(profile_files_label)"
   log_debug "npm cache: ${npm_cache:-not available}"
   log_debug "Options: force_node=$FORCE_NODE_REINSTALL force_codex=$FORCE_CODEX_REINSTALL remove_system=$REMOVE_SYSTEM_CODEX skip_crs=$SKIP_CRS_CONFIG skip_no_proxy=$SKIP_NO_PROXY dry_run=$DRY_RUN log_level=$LOG_LEVEL"
   log_debug "Proxy env: HTTP_PROXY=$(env_state HTTP_PROXY), HTTPS_PROXY=$(env_state HTTPS_PROXY), ALL_PROXY=$(env_state ALL_PROXY), NO_PROXY=$(env_state NO_PROXY), no_proxy=$(env_state no_proxy)"
@@ -448,8 +489,8 @@ print_preflight_summary() {
 remove_profile_block() {
   local block_start="$1"
   local block_end="$2"
-  local tmp
-  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+  local tmp rc_file
+  while IFS= read -r rc_file; do
     [[ -f "$rc_file" ]] || continue
     tmp="$(mktemp)"
 
@@ -465,7 +506,7 @@ remove_profile_block() {
       mv "$tmp" "$rc_file"
       log_info "Removed obsolete profile block from: $rc_file"
     fi
-  done
+  done < <(profile_files_for_persist)
 }
 
 cleanup_obsolete_path_blocks() {
@@ -541,7 +582,7 @@ EOF
   fi
   export PATH="$npm_bin:$PATH"
   hash -r
-  log_ok "Persisted Codex user npm PATH in zsh/bash profile files: $npm_bin"
+  log_ok "Persisted Codex user npm PATH in $(profile_files_label): $npm_bin"
 }
 
 install_brew_and_node() {
@@ -884,7 +925,7 @@ ensure_codex() {
       log_warn "Open a new terminal or ensure PATH has $npm_bin first."
     fi
   else
-    log_warn "codex is not in PATH yet. Open a new terminal or run: source ~/.zshrc"
+    log_warn "codex is not in PATH yet. Open a new terminal or run: $(profile_source_hint)"
   fi
 }
 
@@ -955,13 +996,14 @@ remove_env_from_file() {
 }
 
 cleanup_obsolete_profile_env() {
-  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+  local rc_file
+  while IFS= read -r rc_file; do
     remove_env_from_file "$rc_file" "NPM_CONFIG_PREFIX"
     remove_env_from_file "$rc_file" "NPM_CONFIG_CACHE"
     if is_default_codex_home; then
       remove_env_from_file "$rc_file" "CODEX_HOME" "$HOME/.codex"
     fi
-  done
+  done < <(profile_files_for_persist)
 }
 
 ensure_codex_home_profile_env() {
@@ -973,7 +1015,7 @@ ensure_codex_home_profile_env() {
   while IFS= read -r rc_file; do
     upsert_env_in_file "$rc_file" "CODEX_HOME" "$CODEX_HOME_DIR"
   done < <(profile_files_for_persist)
-  log_ok "Persisted CODEX_HOME in zsh/bash profile files: $CODEX_HOME_DIR"
+  log_ok "Persisted CODEX_HOME in $(profile_files_label): $CODEX_HOME_DIR"
 }
 
 probe_crs_responses_route() {
@@ -1120,7 +1162,7 @@ AUTH
 
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"
-  log_ok "Persisted CRS_OAI_KEY in zsh/bash profile files"
+  log_ok "Persisted CRS_OAI_KEY in $(profile_files_label)"
   remove_crs_backups_after_success "${backup_paths[@]}"
 }
 
@@ -1180,7 +1222,7 @@ main() {
   printf '\n'
   log_ok "Done."
   remove_npm_config_backups_after_success
-  log_info "If environment variables are not visible, open a new terminal or source the updated zsh/bash profile file."
+  log_info "If environment variables are not visible, open a new terminal or run: $(profile_source_hint)"
 }
 
 main "$@"

@@ -56,6 +56,42 @@ contains() {
   return 1
 }
 
+detect_login_shell() {
+  local detected=""
+  if command -v dscl >/dev/null 2>&1; then
+    detected="$(dscl . -read "/Users/$(id -un)" UserShell 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
+  fi
+  if [[ -z "$detected" ]]; then
+    detected="${SHELL:-}"
+  fi
+  if [[ -z "$detected" ]]; then
+    detected="/bin/zsh"
+  fi
+  printf '%s\n' "$detected"
+}
+
+profile_shell_kind() {
+  case "$(basename "$(detect_login_shell)")" in
+    bash)
+      printf 'bash\n'
+      ;;
+    *)
+      printf 'zsh\n'
+      ;;
+  esac
+}
+
+profile_files_for_persist() {
+  case "$(profile_shell_kind)" in
+    bash)
+      printf '%s\n' "$HOME/.bash_profile" "$HOME/.bashrc"
+      ;;
+    *)
+      printf '%s\n' "$HOME/.zprofile" "$HOME/.zshrc"
+      ;;
+  esac
+}
+
 items=()
 for current in "${NO_PROXY:-}" "${no_proxy:-}"; do
   [[ -n "$current" ]] || continue
@@ -127,11 +163,10 @@ EOF
   log "Updated: $file"
 }
 
-# Persist for shells.
-upsert_block "$HOME/.zprofile"
-upsert_block "$HOME/.zshrc"
-[[ -f "$HOME/.bash_profile" ]] && upsert_block "$HOME/.bash_profile"
-[[ -f "$HOME/.bashrc" ]] && upsert_block "$HOME/.bashrc"
+# Persist for the user's login shell only.
+while IFS= read -r profile_file; do
+  upsert_block "$profile_file"
+done < <(profile_files_for_persist)
 
 # Best-effort: set for current GUI session too.
 if command -v launchctl >/dev/null 2>&1; then
@@ -202,8 +237,11 @@ log "Done."
 log "Recommended: open a NEW terminal to apply."
 log "To apply to the CURRENT shell (choose one):"
 echo "  # Option A (preferred): source your shell rc/profile file you just updated:"
-echo "  #   zsh : source ~/.zshrc    (or: source ~/.zprofile)"
-echo "  #   bash: source ~/.bashrc   (or: source ~/.bash_profile)"
+if [[ "$(profile_shell_kind)" == "bash" ]]; then
+  echo "  #   bash: source ~/.bashrc   (or: source ~/.bash_profile)"
+else
+  echo "  #   zsh : source ~/.zshrc    (or: source ~/.zprofile)"
+fi
 echo "  # Option B: export variables (temporary for this shell only):"
 echo "  export NO_PROXY=\"$new\""
 echo "  export no_proxy=\"\$NO_PROXY\""

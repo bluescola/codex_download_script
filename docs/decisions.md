@@ -85,6 +85,22 @@ npm install -g --prefix <CodexNpmPrefix> --cache <CodexNpmCache> @openai/codex
 - 如果发现旧版 profile 中存在 `NPM_CONFIG_PREFIX` 或 `NPM_CONFIG_CACHE`，应继续清理。
 - macOS 允许通过用户级 npm 配置持久化 `prefix`，以保证后续 `npm update -g @openai/codex` 继续落在用户 prefix；不要把 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 写入 shell profile。
 
+## macOS：profile 写入范围
+
+决策：macOS 默认只写登录 shell 对应 profile。登录 shell 为 zsh 时写 `~/.zprofile`、`~/.zshrc`；登录 shell 为 bash 时写 `~/.bash_profile`、`~/.bashrc`。不提供自定义写入范围开关，也不为了兼容而默认同时更新 zsh/bash。
+
+原因：
+
+- 现代 macOS 默认 shell 是 zsh，默认更新 bash 文件会造成“脚本到处改环境”的误解。
+- bash 文件只应在用户登录 shell 是 bash 时追加新配置。
+- profile 写入范围应跟随登录 shell，可解释、可审计，避免实机日志出现不必要的跨 shell 写入。
+
+维护要求：
+
+- Codex PATH、`CODEX_HOME`、`CRS_OAI_KEY` 和 NO_PROXY/no_proxy 在 macOS 上都应遵循同一登录 shell 判断。
+- 旧脚本标记块可以清理；但“发现并清理旧块”不等于允许默认向另一个 shell 追加新块。
+- 新增 profile 写入逻辑时必须先判断登录 shell，不能通过“文件已存在”作为默认追加到另一个 shell 的理由。
+
 ## NO_PROXY 合并语义
 
 决策：NO_PROXY/no_proxy 配置应保留用户已有条目，移除旧版固定 IP `3.27.43.117`、`3.27.43.117:10086`，并追加 `localhost`、`127.0.0.1` 和 CRS base_url 解析出的 host、host:port。
