@@ -1,10 +1,14 @@
 # Codex NO_PROXY bypass setup (Windows)
-# - Reads base_url from CODEX_HOME\config.toml or %USERPROFILE%\.codex\config.toml.
+# - Reads base_url from -ConfigPath, CODEX_HOME\config.toml, or %USERPROFILE%\.codex\config.toml.
 # - Removes legacy fixed IPs (3.27.43.117*) from existing NO_PROXY.
 # - Adds CRS host, host:port, localhost, and 127.0.0.1 to NO_PROXY at User scope.
 # - Preserves user-defined NO_PROXY entries.
 # - Idempotent: safe to run multiple times.
 # - Persists across reboot for the current Windows user.
+
+param(
+  [string]$ConfigPath
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -24,6 +28,9 @@ $LegacyFixed = @("3.27.43.117", "3.27.43.117:10086")
 
 function Add-CrsBaseUrlItems {
   $configCandidates = New-Object System.Collections.Generic.List[string]
+  if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
+    [void]$configCandidates.Add($ConfigPath)
+  }
   if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
     [void]$configCandidates.Add((Join-Path $env:CODEX_HOME 'config.toml'))
   }
