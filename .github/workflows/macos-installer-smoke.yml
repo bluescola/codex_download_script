@@ -219,6 +219,27 @@ jobs:
             exit 1
           fi
 
+          codex_home_path="$(
+            python3 - <<'PY'
+            from pathlib import Path
+
+            candidates = [Path.home() / ".codex"]
+            candidates.extend(sorted(Path("/Users/Shared").glob("Codex-*/.codex")))
+
+            for candidate in candidates:
+                if (candidate / "config.toml").is_file() and (candidate / "auth.json").is_file():
+                    print(candidate)
+                    break
+            PY
+          )"
+          if [[ -z "$codex_home_path" ]]; then
+            echo "::error::Unable to locate CRS artifact directory after config step."
+            find "$HOME" /Users/Shared -maxdepth 4 \( -name config.toml -o -name auth.json \) 2>/dev/null || true
+            exit 1
+          fi
+          echo "CODEX_SMOKE_HOME=$codex_home_path" >> "$GITHUB_ENV"
+          echo "Resolved smoke CODEX_HOME=$codex_home_path"
+
       - name: Apply NO_PROXY only
         shell: bash
         run: |
@@ -262,21 +283,9 @@ jobs:
           source ~/.bash_profile 2>/dev/null || true
           source ~/.bashrc 2>/dev/null || true
           node24_prefix="$(brew --prefix node@24)"
-          shopt -s nullglob
-          codex_home=""
-          candidates=()
-          [[ -n "${CODEX_HOME:-}" ]] && candidates+=("$CODEX_HOME")
-          candidates+=("$HOME/.codex")
-          for shared_home in /Users/Shared/Codex-*/.codex; do
-            candidates+=("$shared_home")
-          done
-          for candidate in "${candidates[@]}"; do
-            [[ -f "$candidate/config.toml" && -f "$candidate/auth.json" ]] || continue
-            codex_home="$candidate"
-            break
-          done
+          codex_home="${CODEX_SMOKE_HOME:-}"
           if [[ -z "$codex_home" ]]; then
-            echo "::error::No CRS artifact directory found in expected candidates: ${candidates[*]}"
+            echo "::error::CODEX_SMOKE_HOME is empty before verify."
             ls -la "$HOME" || true
             ls -la /Users/Shared || true
             find "$HOME" /Users/Shared -maxdepth 4 \( -name config.toml -o -name auth.json \) 2>/dev/null || true
