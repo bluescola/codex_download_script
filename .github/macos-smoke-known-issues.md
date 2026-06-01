@@ -250,3 +250,15 @@ The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `
   after the installer returned, the next workflow statement was a command substitution that rediscovered `CODEX_HOME` via `python3 - <<'PY'`. This is the same class of nested-heredoc surface that already caused misleading failures elsewhere in the smoke workflow.
 - Current mitigation in the smoke branch:
   the `CODEX_HOME` rediscovery helper now uses `python3 -c` instead of an inline Python heredoc.
+
+### 29. Old runner bash plus `set -euo pipefail` is better handled by a batch compatibility sweep than by one-off fixes
+
+- Observed on 2026-06-01 after several macOS smoke iterations kept moving the failure across different shell constructs while the CRS2.0 business logic itself was already correct.
+- Rationale:
+  the remaining risk surface was not the installer intent anymore, but a cluster of shell-compatibility patterns: `if cond1 && cond2`, empty array initialization/expansion, and file-exists-plus-grep checks embedded in one condition.
+- Current mitigation in the smoke branch:
+  the mac installer and smoke workflow are being normalized in one pass toward older-bash-safe patterns:
+  nested `if` blocks instead of `if ... && ...`,
+  true empty arrays instead of sentinel empty-string elements where safe,
+  explicit non-empty guards before array-based helper calls,
+  and `python3 -c` instead of nested inline Python heredocs in workflow bodies.

@@ -356,13 +356,17 @@ jobs:
           }
 
           for rc_file in "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
-            if [[ -f "$rc_file" ]] && grep -Fq '# >>> codex homebrew node path >>>' "$rc_file"; then
-              append_managed_block "$rc_file" '# >>> codex homebrew node path >>>' '# <<< codex homebrew node path <<<'
-              found_node_path_block=1
+            if [[ -f "$rc_file" ]]; then
+              if grep -Fq '# >>> codex homebrew node path >>>' "$rc_file"; then
+                append_managed_block "$rc_file" '# >>> codex homebrew node path >>>' '# <<< codex homebrew node path <<<'
+                found_node_path_block=1
+              fi
             fi
-            if [[ -f "$rc_file" ]] && grep -Fq '# >>> codex no_proxy >>>' "$rc_file"; then
-              append_managed_block "$rc_file" '# >>> codex no_proxy >>>' '# <<< codex no_proxy <<<'
-              found_no_proxy_block=1
+            if [[ -f "$rc_file" ]]; then
+              if grep -Fq '# >>> codex no_proxy >>>' "$rc_file"; then
+                append_managed_block "$rc_file" '# >>> codex no_proxy >>>' '# <<< codex no_proxy <<<'
+                found_no_proxy_block=1
+              fi
             fi
           done
 

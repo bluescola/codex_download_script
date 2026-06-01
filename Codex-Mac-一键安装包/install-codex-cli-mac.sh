@@ -10,7 +10,8 @@ DRY_RUN=0
 LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
 ACTIVE_NODE_PREFIX=""
 ACTIVE_NPM_CMD=""
-NPM_CONFIG_BACKUPS=("")
+NPM_CONFIG_BACKUPS=()
+SYSTEM_CODEX_PREFIXES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -233,54 +234,58 @@ sanitize_legacy_npm_config() {
     fi
   done
 
-  if [[ -f "$npmrc" ]] && grep -qiE '^[[:space:]]*(prefix|globalconfig|cache)[[:space:]]*=' "$npmrc"; then
-    local backup_path tmp
-    tmp="$(mktemp)"
-    awk \
-      -v legacy_prefix_global="$LEGACY_NPM_PREFIX_GLOBAL" \
-      -v legacy_prefix_local="$LEGACY_NPM_PREFIX_LOCAL" \
-      -v legacy_ascii_prefix="$LEGACY_ASCII_NPM_PREFIX" \
-      -v legacy_cache="$LEGACY_NPM_CACHE" \
-      -v legacy_ascii_cache="$LEGACY_ASCII_NPM_CACHE" '
-      {
-        trimmed = $0
-        sub(/^[[:space:]]+/, "", trimmed)
-        if (tolower(trimmed) ~ /^(prefix|globalconfig|cache)[[:space:]]*=/) {
-          key = tolower(trimmed)
-          sub(/[[:space:]]*=.*/, "", key)
+  if [[ -f "$npmrc" ]]; then
+    if grep -qiE '^[[:space:]]*(prefix|globalconfig|cache)[[:space:]]*=' "$npmrc"; then
+      local backup_path tmp
+      tmp="$(mktemp)"
+      awk \
+        -v legacy_prefix_global="$LEGACY_NPM_PREFIX_GLOBAL" \
+        -v legacy_prefix_local="$LEGACY_NPM_PREFIX_LOCAL" \
+        -v legacy_ascii_prefix="$LEGACY_ASCII_NPM_PREFIX" \
+        -v legacy_cache="$LEGACY_NPM_CACHE" \
+        -v legacy_ascii_cache="$LEGACY_ASCII_NPM_CACHE" '
+        {
+          trimmed = $0
+          sub(/^[[:space:]]+/, "", trimmed)
+          if (tolower(trimmed) ~ /^(prefix|globalconfig|cache)[[:space:]]*=/) {
+            key = tolower(trimmed)
+            sub(/[[:space:]]*=.*/, "", key)
 
-          value = trimmed
-          sub(/^[^=]*=/, "", value)
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-          gsub(/^"|"$/, "", value)
-          gsub(/^'\''|'\''$/, "", value)
+            value = trimmed
+            sub(/^[^=]*=/, "", value)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            gsub(/^"|"$/, "", value)
+            gsub(/^'\''|'\''$/, "", value)
 
-          if ((key == "prefix" || key == "globalconfig") &&
-              (value == legacy_prefix_global ||
-               value == legacy_prefix_local ||
-               (legacy_ascii_prefix != "" && value == legacy_ascii_prefix) ||
-               value == legacy_prefix_global "/etc/npmrc" ||
-               value == legacy_prefix_local "/etc/npmrc" ||
-               (legacy_ascii_prefix != "" && value == legacy_ascii_prefix "/etc/npmrc"))) {
-            next
+            if ((key == "prefix" || key == "globalconfig") &&
+                (value == legacy_prefix_global ||
+                 value == legacy_prefix_local ||
+                 (legacy_ascii_prefix != "" && value == legacy_ascii_prefix) ||
+                 value == legacy_prefix_global "/etc/npmrc" ||
+                 value == legacy_prefix_local "/etc/npmrc" ||
+                 (legacy_ascii_prefix != "" && value == legacy_ascii_prefix "/etc/npmrc"))) {
+              next
+            }
+            if (key == "cache" &&
+                (value == legacy_cache ||
+                 (legacy_ascii_cache != "" && value == legacy_ascii_cache))) {
+              next
+            }
           }
-          if (key == "cache" &&
-              (value == legacy_cache ||
-               (legacy_ascii_cache != "" && value == legacy_ascii_cache))) {
-            next
-          }
+          print
         }
-        print
-      }
-    ' "$npmrc" > "$tmp"
-    if cmp -s "$npmrc" "$tmp"; then
-      rm -f "$tmp"
-    else
-      backup_path="$(backup_if_exists "$npmrc")"
-      [[ -n "$backup_path" ]] && NPM_CONFIG_BACKUPS+=("$backup_path")
-      mv "$tmp" "$npmrc"
-      log_warn "Removed legacy installer npm prefix/globalconfig/cache entries from ~/.npmrc."
-      changed=1
+      ' "$npmrc" > "$tmp"
+      if cmp -s "$npmrc" "$tmp"; then
+        rm -f "$tmp"
+      else
+        backup_path="$(backup_if_exists "$npmrc")"
+        if [[ -n "$backup_path" ]]; then
+          NPM_CONFIG_BACKUPS+=("$backup_path")
+        fi
+        mv "$tmp" "$npmrc"
+        log_warn "Removed legacy installer npm prefix/globalconfig/cache entries from ~/.npmrc."
+        changed=1
+      fi
     fi
   fi
 
@@ -292,7 +297,13 @@ sanitize_legacy_npm_config() {
 }
 
 test_preexisting_node_npm() {
-  cmd_exists node && cmd_exists npm
+  if ! cmd_exists node; then
+    return 1
+  fi
+  if ! cmd_exists npm; then
+    return 1
+  fi
+  return 0
 }
 
 test_preexisting_codex() {
@@ -307,8 +318,10 @@ test_preexisting_codex() {
 
     prefix="$("$npm_cmd" config get prefix 2>/dev/null || true)"
     npm_bin="${prefix%/}/bin"
-    if [[ -n "$prefix" ]] && [[ -x "$npm_bin/codex" ]]; then
-      return 0
+    if [[ -n "$prefix" ]]; then
+      if [[ -x "$npm_bin/codex" ]]; then
+        return 0
+      fi
     fi
   fi
 
@@ -449,16 +462,18 @@ cleanup_legacy_path_block() {
   local block_end="# <<< codex user paths <<<"
 
   for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
-    if [[ -f "$rc_file" ]] && grep -qF "$block_start" "$rc_file" 2>/dev/null; then
-      log_info "Removing legacy path block from: $rc_file"
-      local tmp
-      tmp="$(mktemp)"
-      awk -v start="$block_start" -v end="$block_end" '
-        index($0, start) { inblock=1; next }
-        index($0, end)   { inblock=0; next }
-        !inblock { print }
-      ' "$rc_file" > "$tmp"
-      mv "$tmp" "$rc_file"
+    if [[ -f "$rc_file" ]]; then
+      if grep -qF "$block_start" "$rc_file" 2>/dev/null; then
+        log_info "Removing legacy path block from: $rc_file"
+        local tmp
+        tmp="$(mktemp)"
+        awk -v start="$block_start" -v end="$block_end" '
+          index($0, start) { inblock=1; next }
+          index($0, end)   { inblock=0; next }
+          !inblock { print }
+        ' "$rc_file" > "$tmp"
+        mv "$tmp" "$rc_file"
+      fi
     fi
   done
 }
@@ -727,9 +742,11 @@ run_with_optional_sudo() {
     return 0
   fi
 
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && cmd_exists sudo; then
-    if sudo "$@"; then
-      return 0
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    if cmd_exists sudo; then
+      if sudo "$@"; then
+        return 0
+      fi
     fi
   fi
 
@@ -778,9 +795,11 @@ uninstall_system_codex_at_prefix() {
     return 0
   fi
 
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && cmd_exists sudo; then
-    sudo "$npm_cmd" uninstall -g --prefix "$prefix" @openai/codex >/dev/null 2>&1 || return 1
-    return 0
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    if cmd_exists sudo; then
+      sudo "$npm_cmd" uninstall -g --prefix "$prefix" @openai/codex >/dev/null 2>&1 || return 1
+      return 0
+    fi
   fi
 
   return 1
