@@ -92,13 +92,13 @@ codex --version
 
 在开始配置前，你需要从管理员处获取：
 
-- **CRS 服务器地址**: `http://服务器IP:端口`
-- **CRS API Key**: `cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+- **CRS 2.0 base_url**: `https://your-crs-host:8443`
+- **OPENAI_API_KEY / CRS 2.0 token**: 管理员提供的 token
 
 示例：
 ```
-CRS 服务器: http://x.x.x.x:10086
-API Key: cr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+CRS 2.0 base_url: https://your-crs-host:8443
+OPENAI_API_KEY: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 ---
@@ -129,7 +129,7 @@ nano ~/.codex/config.toml
 
 ```toml
 model_provider = "OpenAI"
-model = "gpt-5.4"
+model = "gpt-5.5"
 review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
@@ -160,13 +160,13 @@ apps = false
 
 **⚠️ 重要修改**：将 `base_url` 中的地址替换为管理员提供的服务器地址。
 
-示例（假设服务器是 x.x.x.x:10086）：
+示例（CRS 2.0）：
 ```toml
 base_url = "https://your-crs-host:8443"
 ```
 
 **模型说明**：
-- 默认使用 `gpt-5.4`（如管理员提供其他模型名，也可以直接替换 `model = "..."`）
+- 默认使用 `gpt-5.5`（如管理员提供其他模型名，也可以直接替换 `model = "..."`）
 
 **推理深度**：
 - `low`: 快速响应
@@ -191,7 +191,7 @@ nano ~/.codex/auth.json
 
 ```json
 {
-    "OPENAI_API_KEY": "cr_xxxxxxxxxxxxxxxxxxxxxxxx"
+    "OPENAI_API_KEY": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 }
 ```
 
@@ -292,7 +292,7 @@ codex "解释这段代码的功能: [粘贴代码]"
 model_reasoning_effort = "medium"
 
 # 如果管理员提供了其他模型名，也可以直接切换 model，例如：
-# model = "gpt-5.4"
+# model = "gpt-5.5"
 ```
 
 修改后立即生效，无需重启。
@@ -312,10 +312,10 @@ model_reasoning_effort = "medium"
 cat ~/.codex/config.toml | grep base_url
 ```
 
-2. 测试服务器连通性：
+2. 测试 CRS 2.0 Responses 入口连通性：
 ```bash
-curl http://服务器IP:端口/health
-# 应返回: {"status":"healthy",...}
+base_url="https://your-crs-host:8443"
+curl -i -X POST "$base_url/responses" -H "Content-Type: application/json" -d '{}'
 ```
 
 3. 联系管理员确认服务器状态
@@ -410,7 +410,7 @@ echo "问题" | codex
 完整配置需要修改三个位置：
 
 ### 1. `~/.codex/config.toml`
-- 设置 `base_url` 为 CRS 服务器地址
+- 设置 `base_url` 为 CRS 2.0 OpenAI-compatible 入口地址
 - 配置 `model` 和 `model_reasoning_effort`
 - 使用 `model_provider = "OpenAI"` 和 `requires_openai_auth = true`
 

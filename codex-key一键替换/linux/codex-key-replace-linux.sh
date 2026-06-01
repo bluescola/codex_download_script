@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-read -r -p "请输入 base_url: " BASE_URL
-read -r -p "请输入 OPENAI_API_KEY: " OPENAI_API_KEY
-
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 CONFIG_PATH="$CODEX_DIR/config.toml"
 AUTH_PATH="$CODEX_DIR/auth.json"
@@ -44,6 +41,97 @@ backup_if_exists() {
   fi
 }
 
+get_current_base_url() {
+  local path="$1"
+  [ -f "$path" ] || return 0
+  sed -n 's/^[[:space:]]*base_url[[:space:]]*=[[:space:]]*"\([^"]*\)".*$/\1/p' "$path" | head -n 1
+}
+
+get_current_openai_key() {
+  local path="$1"
+  [ -f "$path" ] || return 0
+  sed -n 's/.*"OPENAI_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$path" | head -n 1
+}
+
+mask_secret() {
+  local value="$1"
+  local length
+  if [ -z "$value" ]; then
+    printf '<未找到>'
+    return
+  fi
+  length=${#value}
+  if [ "$length" -le 10 ]; then
+    printf '***'
+    return
+  fi
+  printf '%s...%s' "${value:0:6}" "${value:$((length - 4)):4}"
+}
+
+show_crs2_reference_config() {
+  local current_base_url="$1"
+  local current_openai_key="$2"
+
+  printf '\n'
+  printf '当前 CRS 2.0 参考配置（来自现有 config.toml/auth.json，key 已脱敏）：\n'
+  if [ -n "$current_base_url" ]; then
+    printf '  base_url = "%s"\n' "$current_base_url"
+  else
+    printf '  base_url = <未找到>\n'
+  fi
+  printf '  OPENAI_API_KEY = %s\n' "$(mask_secret "$current_openai_key")"
+  printf '请输入新的 CRS 2.0 / OpenAI-compatible 配置；直接回车会沿用当前值。\n\n'
+}
+
+read_required_value() {
+  local prompt="$1"
+  local default_value="${2:-}"
+  local value
+
+  while true; do
+    if [ -n "$default_value" ]; then
+      read -r -p "$prompt [回车沿用当前值]: " value
+    else
+      read -r -p "$prompt: " value
+    fi
+
+    if [ -z "$value" ] && [ -n "$default_value" ]; then
+      printf '%s' "$default_value"
+      return
+    fi
+    if [ -n "$value" ]; then
+      printf '%s' "$value"
+      return
+    fi
+    echo "输入不能为空，请重试。" >&2
+  done
+}
+
+read_secret_value() {
+  local prompt="$1"
+  local default_value="${2:-}"
+  local value
+
+  while true; do
+    if [ -n "$default_value" ]; then
+      read -r -s -p "$prompt [回车沿用当前值]: " value
+    else
+      read -r -s -p "$prompt: " value
+    fi
+    printf '\n' >&2
+
+    if [ -z "$value" ] && [ -n "$default_value" ]; then
+      printf '%s' "$default_value"
+      return
+    fi
+    if [ -n "$value" ]; then
+      printf '%s' "$value"
+      return
+    fi
+    echo "输入不能为空，请重试。" >&2
+  done
+}
+
 escape_quotes() {
   printf '%s' "$1" | sed 's/"/\\"/g'
 }
@@ -71,6 +159,13 @@ remove_legacy_env_from_file() {
   mv "$tmp" "$file"
 }
 
+CURRENT_BASE_URL="$(get_current_base_url "$CONFIG_PATH")"
+CURRENT_OPENAI_KEY="$(get_current_openai_key "$AUTH_PATH")"
+show_crs2_reference_config "$CURRENT_BASE_URL" "$CURRENT_OPENAI_KEY"
+
+BASE_URL="$(read_required_value "请输入 CRS 2.0 base_url（例如 https://your-crs-host:8443）" "$CURRENT_BASE_URL")"
+OPENAI_API_KEY="$(read_secret_value "请输入 OPENAI_API_KEY / CRS 2.0 token（输入隐藏）" "$CURRENT_OPENAI_KEY")"
+
 ensure_path "$CODEX_DIR" dir
 ensure_path "$CONFIG_PATH" file
 ensure_path "$AUTH_PATH" file
@@ -83,7 +178,7 @@ escaped_openai_key=$(escape_json_string "$OPENAI_API_KEY")
 
 cat > "$CONFIG_PATH" <<EOF
 model_provider = "OpenAI"
-model = "gpt-5.4"
+model = "gpt-5.5"
 review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true

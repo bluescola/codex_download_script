@@ -769,7 +769,7 @@ configure_crs() {
   auth_path="$codex_dir/auth.json"
 
   log_info "Starting CRS configuration..."
-  base_url_input="$(read_required 'Enter CRS base_url (must expose /responses, example: http://x.x.x.x:10086/openai): ')"
+  base_url_input="$(read_required 'Enter CRS 2.0 base_url (must expose /responses, example: https://your-crs-host:8443): ')"
   openai_key="$(read_secret_required 'Enter OPENAI_API_KEY / CRS 2.0 token (hidden input): ')"
   base_url="$(resolve_crs_base_url "$base_url_input")"
   escaped_openai_key="$(escape_json_string "$openai_key")"
@@ -783,7 +783,7 @@ configure_crs() {
 
   cat > "$config_path" <<CFG
 model_provider = "OpenAI"
-model = "gpt-5.4"
+model = "gpt-5.5"
 review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true

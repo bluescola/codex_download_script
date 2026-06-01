@@ -1874,7 +1874,7 @@ function Configure-CrsFiles {
     Write-Info 'Starting CRS configuration...'
     Write-Info 'Please provide values for base_url and OPENAI_API_KEY.'
 
-    $baseUrlInput = Read-RequiredInput 'Enter CRS base_url (must expose /responses, example: http://x.x.x.x:10086/openai)'
+    $baseUrlInput = Read-RequiredInput 'Enter CRS 2.0 base_url (must expose /responses, example: https://your-crs-host:8443)'
     $openAiKey = Read-SecretInput 'Enter OPENAI_API_KEY / CRS 2.0 token (input hidden)'
     $baseUrl = Resolve-CrsBaseUrl $baseUrlInput
 
@@ -1885,7 +1885,7 @@ function Configure-CrsFiles {
 
     $configToml = @"
 model_provider = "OpenAI"
-model = "gpt-5.4"
+model = "gpt-5.5"
 review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
@@ -1912,6 +1912,9 @@ apps = false
 [notice.model_migrations]
 "gpt-5.1-codex-max" = "gpt-5.4"
 "gpt-5.2" = "gpt-5.4"
+
+[windows]
+sandbox = "elevated"
 "@
 
     $authJson = (@{
