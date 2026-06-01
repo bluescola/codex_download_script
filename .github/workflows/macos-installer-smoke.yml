@@ -259,21 +259,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          verify_log="$RUNNER_TEMP/verify-crs-artifacts.log"
+          if ! bash <<'BASH' >"$verify_log" 2>&1
+          set -euo pipefail
+
           require_eq() {
             local expected="$1"
             local actual="$2"
             local label="$3"
             if [[ "$actual" != "$expected" ]]; then
               echo "::error::$label expected [$expected] but got [$actual]"
-              exit 1
-            fi
-          }
-
-          require_nonempty() {
-            local actual="$1"
-            local label="$2"
-            if [[ -z "$actual" ]]; then
-              echo "::error::$label is empty"
               exit 1
             fi
           }
@@ -288,16 +283,13 @@ jobs:
             fi
           }
 
-          node24_prefix="$(brew --prefix node@24)"
           codex_home="${CODEX_SMOKE_HOME:-}"
           if [[ -z "$codex_home" && -f "$GITHUB_WORKSPACE/.codex-smoke-home" ]]; then
             codex_home="$(tr -d '\r' < "$GITHUB_WORKSPACE/.codex-smoke-home")"
             echo "Recovered CODEX_HOME from workspace marker: $codex_home"
           fi
           if [[ -z "$codex_home" ]]; then
-            codex_home="$(
-              python3 -c 'from pathlib import Path; candidates=[Path.home()/".codex", *sorted(Path("/Users/Shared").glob("Codex-*/.codex"))]; print(next((str(candidate) for candidate in candidates if (candidate/"config.toml").is_file() and (candidate/"auth.json").is_file()), ""))'
-            )"
+            codex_home="$(python3 -c 'from pathlib import Path; candidates=[Path.home()/".codex", *sorted(Path("/Users/Shared").glob("Codex-*/.codex"))]; print(next((str(candidate) for candidate in candidates if (candidate/"config.toml").is_file() and (candidate/"auth.json").is_file()), ""))')"
             if [[ -n "$codex_home" ]]; then
               echo "Rediscovered CODEX_HOME during verify: $codex_home"
             fi
@@ -320,13 +312,37 @@ jobs:
           require_file_contains 'base_url = "http://127.0.0.1:18080/openai"' "$config_path" "config base_url"
           require_file_contains 'wire_api = "responses"' "$config_path" "config wire_api"
           require_file_contains 'requires_openai_auth = true' "$config_path" "config requires_openai_auth"
-          auth_token="$(
-            python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("OPENAI_API_KEY", ""))' "$auth_path"
-          )"
+          auth_token="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("OPENAI_API_KEY", ""))' "$auth_path")"
           require_eq "crs2-smoke-token" "$auth_token" "auth OPENAI_API_KEY"
           printf '%s\n' "$codex_home" > "$RUNNER_TEMP/codex-home-path.txt"
           printf '%s\n' "$config_path" > "$RUNNER_TEMP/codex-config-path.txt"
           printf '%s\n' "$auth_path" > "$RUNNER_TEMP/codex-auth-path.txt"
+          echo "CRS artifact verification passed."
+BASH
+          then
+            echo "::group::verify-crs-artifacts.log"
+            cat "$verify_log" || true
+            echo "::endgroup::"
+            python3 - "$verify_log" <<'PY'
+            import sys
+            from pathlib import Path
+
+            path = Path(sys.argv[1])
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except FileNotFoundError:
+                lines = ["verify log missing"]
+
+            if not lines:
+                lines = ["verify log is empty"]
+
+            for line in lines[-40:]:
+                print(f"::error::{line}")
+            PY
+            exit 1
+          fi
+
+          cat "$verify_log"
 
       - name: Build managed shell env
         shell: bash

@@ -201,6 +201,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   short Python helpers in the verify path now use `python3 -c` instead of nested heredocs.
 
+### 24. The first verify step also needs its own explicit log capture wrapper
+
+- Observed on 2026-06-01 after run `26732483222` still failed in `Verify CRS 2.0 artifacts` without exposing the concrete assertion.
+- Rationale:
+  splitting the verify path by step isolated the failing layer, but the first artifact-check step still needed the same explicit log replay treatment as the later managed-shell checks.
+- Current mitigation in the smoke branch:
+  `Verify CRS 2.0 artifacts` now runs inside a captured bash sub-script and replays the captured log lines back into the Actions UI on failure.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
