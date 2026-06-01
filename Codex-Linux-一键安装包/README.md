@@ -1,43 +1,37 @@
-# Codex Linux 一键安装包说明
+# Codex Linux 一键安装包
 
-## 运行方式
+## 入口
 
 ```bash
 bash install-codex-cli-linux.sh
 ```
 
-请以目标普通用户运行，不要用 `sudo bash install-codex-cli-linux.sh`。脚本会拒绝 root 运行，避免配置写到 `/root` 后普通用户不可用。
+请以目标普通用户运行，不要用 `sudo`。建议复制整个目录运行，因为安装器会调用同目录的 `setup_no_proxy_linux.sh`。
 
-建议复制整个 `Codex-Linux-一键安装包` 目录再运行，因为安装器会调用同目录的 `setup_no_proxy_linux.sh`。
+## 行为摘要
 
-## 脚本会做什么
-
-- 检查/安装用户级 Node.js LTS 和 npm。
-- 下载 Node.js tarball 后校验 Node 官方 `SHASUMS256.txt` 中的 SHA256，校验失败会中止。
-- 安装 `@openai/codex` 到用户 npm prefix。
-- 写入 Codex CRS 配置，默认 `sandbox_mode = "workspace-write"`。
-- 写入前会备份已有 `config.toml` 和 `auth.json`，不会删除历史备份。
-- 配置 `NO_PROXY/no_proxy`，会尝试从 `CODEX_HOME` 或 `~/.codex/config.toml` 读取 CRS `base_url` 并加入实际 host/host:port。
-
-## 系统级 Codex
-
-- 默认只检测并提示系统级 Codex，不自动卸载。
-- 如确实需要移除系统级 Codex，请显式传入：
-
-```bash
-bash install-codex-cli-linux.sh --remove-system-codex
-```
-
-执行前请确认输出中的系统级 npm prefix，避免误删共享安装。
+- 开头打印 preflight 环境摘要，便于排查 Node/npm/Codex、nvm、路径和代理问题。
+- 通过 nvm 安装或启用 Node.js LTS，并把 Codex 安装到 nvm npm prefix。
+- 使用 nvm 前会清理当前进程和 `~/.npmrc` 中与 nvm 冲突的 `prefix/globalconfig`，并移除旧安装器写入的 npm cache 配置。
+- 不长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`。
+- 写入 CRS 配置和 `auth.json`；写入失败时保留本次备份，成功后清理本次备份。
+- 调用 `setup_no_proxy_linux.sh` 合并 NO_PROXY/no_proxy。
+- HOME/TMPDIR 含非 ASCII 时使用 ASCII-safe 根目录。
 
 ## 常用参数
 
-- `--force-node-reinstall`：强制重新安装用户级 Node.js/npm。
-- `--force-codex-reinstall`：强制重装用户级 `@openai/codex`。
+- `--dry-run`：只打印环境摘要，不安装、不写文件、不改环境。
+- `--verbose`：打印详细诊断。
+- `--trace`：打印 trace 级诊断。
+- `--force-node-reinstall`：强制重装 Node.js/npm。
+- `--force-codex-reinstall`：强制重装 `@openai/codex`。
 - `--remove-system-codex`：显式移除检测到的系统级 Codex。
 - `--skip-crs-config`：跳过 CRS 配置交互。
 - `--skip-no-proxy`：跳过 NO_PROXY/no_proxy 配置。
 
-## 下载校验说明
+## 维护入口
 
-如果没有 SHA256 校验，下载被代理/CDN/缓存污染、被篡改或损坏时，脚本可能继续解压错误二进制。现在校验失败会直接中止，请检查网络代理或重新下载后再试。
+- 总览：[../docs/script-system-overview.md](../docs/script-system-overview.md)
+- 决策记录：[../docs/decisions.md](../docs/decisions.md)
+- 流程图：[../docs/graphs/linux-install.drawio](../docs/graphs/linux-install.drawio)
+- 用户配置指南：[../Codex-CLI-配置指南-linux.md](../Codex-CLI-配置指南-linux.md)

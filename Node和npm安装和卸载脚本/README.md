@@ -2,6 +2,8 @@
 
 本目录用于单独处理 Windows 上的 Node.js/npm，不绑定 Codex 安装流程。
 
+维护图谱：[`../docs/graphs/node-npm.drawio`](../docs/graphs/node-npm.drawio)
+
 ## `download-node-npm-install.cmd`
 
 - 调用 `download-node-npm-install.ps1`，安装 Node.js LTS x64 zip 到当前用户目录（默认类似 `%LOCALAPPDATA%\Programs\nodejs`）。

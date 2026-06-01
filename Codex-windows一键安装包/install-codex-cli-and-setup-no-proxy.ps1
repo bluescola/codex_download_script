@@ -2,19 +2,38 @@ param(
     [switch]$ForceNodeReinstall,
     [switch]$ForceCodexReinstall,
     [switch]$RemoveSystemCodex,
-    [switch]$SkipCrsConfig
+    [switch]$SkipCrsConfig,
+    [switch]$DryRun,
+    [switch]$VerboseLog,
+    [switch]$TraceLog
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-function Write-Info([string]$Message) {
-    Write-Host "[INFO] $Message" -ForegroundColor Cyan
+$script:DryRun = [bool]$DryRun
+$script:RequestedLogLevel = if ($TraceLog) {
+    'trace'
+} elseif ($VerboseLog) {
+    'verbose'
+} elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_LOG_LEVEL)) {
+    $env:CODEX_INSTALL_LOG_LEVEL
+} else {
+    'normal'
 }
 
-function Write-Ok([string]$Message) {
-    Write-Host "[OK] $Message" -ForegroundColor Green
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$loggingModule = Join-Path $repoRoot 'script-modules\logging\logging.ps1'
+if (Test-Path -LiteralPath $loggingModule) {
+    . $loggingModule
+} else {
+    function Initialize-CodexLogging { param([string]$Level = 'normal') $script:CodexLogLevel = $Level }
+    function Write-Info([string]$Message) { Write-Host "[INFO] $Message" -ForegroundColor Cyan }
+    function Write-WarnMsg([string]$Message) { Write-Host "[WARN] $Message" -ForegroundColor Yellow }
+    function Write-Ok([string]$Message) { Write-Host "[OK] $Message" -ForegroundColor Green }
+    function Write-DebugMsg([string]$Message) { if ($script:CodexLogLevel -in @('verbose', 'trace')) { Write-Host "[DEBUG] $Message" -ForegroundColor DarkCyan } }
+    function Write-TraceMsg([string]$Message) { if ($script:CodexLogLevel -eq 'trace') { Write-Host "[TRACE] $Message" -ForegroundColor DarkGray } }
 }
+Initialize-CodexLogging -Level $script:RequestedLogLevel
 
 try {
     # Keep this wrapper ASCII-only so it works even in legacy Windows PowerShell encodings.
@@ -38,7 +57,15 @@ try {
         -ForceNodeReinstall:$ForceNodeReinstall `
         -ForceCodexReinstall:$ForceCodexReinstall `
         -RemoveSystemCodex:$RemoveSystemCodex `
-        -SkipCrsConfig:$SkipCrsConfig
+        -SkipCrsConfig:$SkipCrsConfig `
+        -DryRun:$DryRun `
+        -VerboseLog:$VerboseLog `
+        -TraceLog:$TraceLog
+
+    if ($DryRun) {
+        Write-Ok 'Dry run complete. Skipping NO_PROXY setup.'
+        exit 0
+    }
 
     Write-Host ''
     Write-Info 'Step 2/2: Configure NO_PROXY bypass (User scope)...'

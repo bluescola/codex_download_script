@@ -3,7 +3,9 @@ set -euo pipefail
 
 # Codex NO_PROXY bypass setup (Linux)
 # - Reads base_url from CODEX_HOME/config.toml or ~/.codex/config.toml.
-# - Rebuilds NO_PROXY/no_proxy with CRS host, host:port, localhost, and 127.0.0.1 only.
+# - Removes legacy fixed IPs (3.27.43.117*) from existing NO_PROXY.
+# - Adds CRS host, host:port, localhost, and 127.0.0.1 to NO_PROXY/no_proxy.
+# - Preserves user-defined NO_PROXY entries.
 # - Persists across reboot by updating shell profiles and environment.d.
 # - Idempotent: safe to run multiple times.
 
@@ -12,6 +14,9 @@ log() {
 }
 
 required=("localhost" "127.0.0.1")
+
+# Legacy fixed IPs from older installer versions — strip these on every run.
+legacy_fixed=("3.27.43.117" "3.27.43.117:10086")
 
 append_crs_base_url_items() {
   local config_path="${CODEX_HOME:-$HOME/.codex}/config.toml"
@@ -37,9 +42,14 @@ log "Current NO_PROXY/no_proxy:"
 echo "  NO_PROXY=${NO_PROXY:-}"
 echo "  no_proxy=${no_proxy:-}"
 
+trim() {
+  echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
 contains() {
   local needle="$1"; shift
   local item
+  [[ "$#" -gt 0 ]] || return 1
   for item in "$@"; do
     [[ "$item" == "$needle" ]] && return 0
   done
@@ -47,8 +57,25 @@ contains() {
 }
 
 items=()
+for current in "${NO_PROXY:-}" "${no_proxy:-}"; do
+  [[ -n "$current" ]] || continue
+  IFS=',' read -r -a parts <<< "${current}"
+  for p in "${parts[@]}"; do
+    p="$(trim "$p")"
+    [[ -z "$p" ]] && continue
+    # Strip legacy fixed IPs
+    if contains "$p" "${legacy_fixed[@]}"; then
+      log "Removing legacy fixed IP: $p"
+      continue
+    fi
+    if ((${#items[@]} == 0)) || ! contains "$p" "${items[@]}"; then
+      items+=("$p")
+    fi
+  done
+done
+
 for v in "${required[@]}"; do
-  if contains "$v" "${items[@]}"; then
+  if ((${#items[@]} > 0)) && contains "$v" "${items[@]}"; then
     log "Already present: $v"
   else
     log "Adding: $v"
@@ -57,13 +84,15 @@ for v in "${required[@]}"; do
 done
 
 new=""
-for i in "${items[@]}"; do
-  if [[ -z "$new" ]]; then
-    new="$i"
-  else
-    new="${new},${i}"
-  fi
-done
+if ((${#items[@]} > 0)); then
+  for i in "${items[@]}"; do
+    if [[ -z "$new" ]]; then
+      new="$i"
+    else
+      new="${new},${i}"
+    fi
+  done
+fi
 
 log "New NO_PROXY:"
 echo "  ${new}"

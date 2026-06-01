@@ -106,9 +106,11 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 network_access = "enabled"
 
-sandbox_mode = "workspace-write"
-approval_policy = "on-request"
-# 高风险：仅在完全理解风险时才改为 approval_policy = "never"
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+# 正常模式：
+# sandbox_mode = "workspace-write"
+# approval_policy = "on-request"
 
 [model_providers.OpenAI]
 name = "OpenAI"
@@ -161,7 +163,7 @@ nano ~/.codex/auth.json
 
 ```json
 {
-    "OPENAI_API_KEY": "sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+    "OPENAI_API_KEY": "cr_xxxxxxxxxxxxxxxxxxxxxxxx"
 }
 ```
 
@@ -183,13 +185,13 @@ export CODEX_HOME="/Users/Shared/Codex-$(id -u)/.codex"
 
 ## ✅ 验证配置
 
-### 测试 1: 检查环境变量
+### 测试 1: 检查认证文件
 
 ```bash
-echo $CRS_OAI_KEY
+cat ~/.codex/auth.json
 ```
 
-应该输出完整的 API Key（以 `cr_` 开头）。
+应该能看到 `OPENAI_API_KEY` 已写入管理员提供的 CRS 2.0 token。
 
 ### 测试 2: 检查配置文件
 
@@ -228,10 +230,8 @@ codex "写一个 Python 函数计算斐波那契数列"
 
 ```
 □ ~/.codex/config.toml 已创建并配置正确的 base_url
-□ ~/.codex/auth.json 已创建并设置 OPENAI_API_KEY 为 null
-□ 环境变量 CRS_OAI_KEY 已添加到 ~/.zshrc / ~/.zprofile（bash 则为 ~/.bash_profile）
-□ 执行 source ~/.zshrc（bash 则 source ~/.bash_profile）加载环境变量
-□ echo $CRS_OAI_KEY 显示正确的 API Key
+□ ~/.codex/auth.json 已创建并写入 OPENAI_API_KEY
+□ 如使用 ASCII 安全目录，CODEX_HOME 已指向对应 .codex 目录
 □ codex "Hello" 测试成功
 ```
 
@@ -298,30 +298,30 @@ model_reasoning_effort = "medium"
 
 **排查步骤**：
 
-1. 检查环境变量是否设置：
+1. 检查 `auth.json` 是否写入 token：
    ```bash
-   echo $CRS_OAI_KEY
+   cat ~/.codex/auth.json
    ```
-2. 如果显示为空，重新加载配置：
+2. 确认 `config.toml` 使用 OpenAI-compatible 配置：
    ```bash
-   source ~/.zshrc
-   echo $CRS_OAI_KEY
+   grep -E 'model_provider|requires_openai_auth|base_url' ~/.codex/config.toml
    ```
 3. 如果仍然失败，联系管理员获取新的 API Key
 
 ---
 
-### Q3: 每次打开新终端都需要重新设置环境变量
+### Q3: 每次打开新终端都找不到配置
 
-**原因**：环境变量未正确添加到 `~/.zshrc`（或 `~/.bashrc`）
+**原因**：使用了非默认配置目录，但 `CODEX_HOME` 未正确持久化
 
 **解决方法**：
 
-1. 确认 rc 文件中有以下内容：
+1. 确认当前配置目录：
    ```bash
-   grep -n "CRS_OAI_KEY" ~/.zshrc ~/.bashrc 2>/dev/null || true
+   echo "${CODEX_HOME:-$HOME/.codex}"
+   ls -la "${CODEX_HOME:-$HOME/.codex}"
    ```
-2. 如果没有，重新添加并 `source` 对应文件。
+2. 如果一键安装脚本启用了 ASCII 安全目录，持久化 `CODEX_HOME` 到 `~/.zshrc` 或 `~/.bash_profile`。
 
 ---
 
@@ -348,10 +348,8 @@ echo "问题" | codex
 ```
 ~/.codex/
 ├── config.toml       # 主配置（服务器地址、模型）
-├── auth.json         # 认证配置（设为 null）
+├── auth.json         # 认证配置（OPENAI_API_KEY）
 └── ...               # 其他自动生成的文件
-
-~/.zshrc 或 ~/.bashrc # 环境变量（CRS_OAI_KEY）
 ```
 
 ---
@@ -377,13 +375,13 @@ echo "问题" | codex
 ### 1. `~/.codex/config.toml`
 - 设置 `base_url` 为 CRS 服务器地址
 - 配置 `model` 和 `model_reasoning_effort`
-- 指定 `env_key = "CRS_OAI_KEY"`
+- 使用 `model_provider = "OpenAI"` 和 `requires_openai_auth = true`
 
 ### 2. `~/.codex/auth.json`
-- 设置 `"OPENAI_API_KEY": null`
+- 写入 `"OPENAI_API_KEY": "你的密钥"`
 
-### 3. `~/.zshrc`（或 `~/.bashrc`）
-- 添加 `export CRS_OAI_KEY="你的密钥"`
+### 3. 可选 `CODEX_HOME`
+- 仅当配置目录不是默认 `~/.codex` 时设置
 - 执行 `source ~/.zshrc`（或 `source ~/.bashrc`）加载
 
 ---

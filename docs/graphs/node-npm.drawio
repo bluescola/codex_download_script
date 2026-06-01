@@ -1,0 +1,72 @@
+<mxfile host="app.diagrams.net" modified="2026-05-31T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="node-npm" name="Node npm 安装卸载图">
+    <mxGraphModel dx="1300" dy="820" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="950" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Windows 独立 Node/npm 安装与卸载流程框图" style="text;html=1;strokeColor=none;fillColor=none;fontSize=26;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="300" y="30" width="800" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="installcmd" value="download-node-npm-install.cmd&lt;br&gt;双击安装入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="110" y="115" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="installps" value="download-node-npm-install.ps1&lt;br&gt;安装主脚本" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="470" y="115" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="index" value="Node 官方 index.json&lt;br&gt;选择 LTS x64" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="120" y="285" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="zip" value="Node LTS zip&lt;br&gt;下载到临时目录" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="440" y="285" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="sha" value="SHASUMS256.txt&lt;br&gt;官方哈希清单" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="760" y="285" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="hash" value="SHA256 校验&lt;br&gt;失败则中止" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="285" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="extract" value="解压&lt;br&gt;准备新目录" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="210" y="455" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="atomic" value="原子安装&lt;br&gt;备份旧目录 / 失败回滚" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="510" y="455" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="path" value="用户 PATH&lt;br&gt;加入用户级 Node 目录" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="870" y="455" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="verify" value="验证&lt;br&gt;node -v / npm -v" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eef7e8;strokeColor=#72a85f;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="455" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="uninstallcmd" value="uninstall-node-npm.cmd&lt;br&gt;双击卸载入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="150" y="660" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="uninstallps" value="uninstall-node-npm.ps1&lt;br&gt;卸载主脚本" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="500" y="660" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="userremove" value="删除用户级 Node&lt;br&gt;脚本安装目录优先" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="850" y="620" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="msi" value="系统 MSI 卸载&lt;br&gt;需要 UAC / msiexec" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="850" y="760" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="remain" value="残留检查&lt;br&gt;PATH / 目录 / 注册表" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eef7e8;strokeColor=#72a85f;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="690" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="installcmd" target="installps"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="installps" target="index"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="index" target="zip"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="zip" target="sha"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="sha" target="hash"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="hash" target="extract"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="extract" target="atomic"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="atomic" target="path"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="path" target="verify"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="uninstallcmd" target="uninstallps"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="uninstallps" target="userremove"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" value="未找到用户级安装" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#c7a447;strokeWidth=2;dashed=1;" edge="1" parent="1" source="uninstallps" target="msi"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="userremove" target="remain"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="msi" target="remain"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -89,9 +89,11 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 network_access = "enabled"
 
-sandbox_mode = "workspace-write"
-approval_policy = "on-request"
-# High risk: only use approval_policy = "never" if you fully understand the risk.
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+# Normal mode:
+# sandbox_mode = "workspace-write"
+# approval_policy = "on-request"
 
 [model_providers.OpenAI]
 name = "OpenAI"

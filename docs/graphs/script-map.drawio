@@ -1,0 +1,106 @@
+<mxfile host="app.diagrams.net" modified="2026-05-31T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="script-map" name="脚本总关系图">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Codex 脚本系统总关系图" style="text;html=1;strokeColor=none;fillColor=none;fontSize=26;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="390" y="30" width="720" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="config" value="用户配置指南&lt;br&gt;Windows / macOS / Linux" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="80" y="110" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="overview" value="docs/script-system-overview.md&lt;br&gt;维护总览" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="410" y="110" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="decisions" value="docs/decisions.md&lt;br&gt;决策记录" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="780" y="110" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="graphs" value="docs/graphs/*.drawio&lt;br&gt;可编辑流程图谱" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="110" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="logsh" value="logging.sh&lt;br&gt;Bash 日志模块" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eef7e8;strokeColor=#72a85f;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="210" y="270" width="230" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="logps" value="logging.ps1&lt;br&gt;PowerShell 日志模块" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eef7e8;strokeColor=#72a85f;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="940" y="270" width="250" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="linux" value="Linux 安装包&lt;br&gt;install-codex-cli-linux.sh" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="110" y="430" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="linuxproxy" value="Linux NO_PROXY&lt;br&gt;setup_no_proxy_linux.sh" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="110" y="590" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="mac" value="macOS 安装包&lt;br&gt;install-codex-cli-mac.sh" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="455" y="430" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="macproxy" value="macOS NO_PROXY&lt;br&gt;setup_no_proxy_mac.sh" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="455" y="590" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="win" value="Windows 安装包&lt;br&gt;.cmd -&gt; 组合 ps1 -&gt; 主 ps1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="800" y="430" width="290" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="winproxy" value="Windows NO_PROXY&lt;br&gt;setup_no_proxy_windows.ps1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="800" y="590" width="290" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="repair" value="Windows 修复工具&lt;br&gt;PATH / 策略 / VC++" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9b6dd6;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1135" y="430" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="node" value="独立 Node/npm 工具&lt;br&gt;安装 / 卸载" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1135" y="590" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="proxytools" value="独立 NO_PROXY 工具&lt;br&gt;codex绕过代理配置/" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="455" y="760" width="290" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="overview" target="decisions">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="overview" target="graphs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#72a85f;strokeWidth=2;" edge="1" parent="1" source="logsh" target="linux">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#72a85f;strokeWidth=2;" edge="1" parent="1" source="logsh" target="mac">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#72a85f;strokeWidth=2;" edge="1" parent="1" source="logps" target="win">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="config" target="linux">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="config" target="mac">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="config" target="win">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="linux" target="linuxproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="mac" target="macproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="win" target="winproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="辅助修复" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#9b6dd6;strokeWidth=2;dashed=1;" edge="1" parent="1" source="repair" target="win">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="同类逻辑" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#d58b4c;strokeWidth=2;dashed=1;" edge="1" parent="1" source="proxytools" target="linuxproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="同类逻辑" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#d58b4c;strokeWidth=2;dashed=1;" edge="1" parent="1" source="proxytools" target="macproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" value="同类逻辑" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#d58b4c;strokeWidth=2;dashed=1;" edge="1" parent="1" source="proxytools" target="winproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" value="独立工具" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#d58b4c;strokeWidth=2;dashed=1;" edge="1" parent="1" source="node" target="win">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -52,9 +52,11 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 network_access = "enabled"
 
-sandbox_mode = "workspace-write"
-approval_policy = "on-request"
-# 高风险：仅在完全理解风险时才改为 approval_policy = "never"
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+# 正常模式：
+# sandbox_mode = "workspace-write"
+# approval_policy = "on-request"
 
 [model_providers.OpenAI]
 name = "OpenAI"
@@ -89,4 +91,4 @@ try {
 
 Write-Host "已更新：$configPath"
 Write-Host "已更新：$authPath"
-Write-Host '已按当前 CRS 2.0 / OpenAI-compatible 格式重写配置。'
+Write-Host 'Updated with current CRS 2.0 / OpenAI-compatible config format.'

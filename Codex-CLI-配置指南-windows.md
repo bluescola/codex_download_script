@@ -101,9 +101,11 @@ model_reasoning_effort = "xhigh"
 disable_response_storage = true
 network_access = "enabled"
 
-sandbox_mode = "workspace-write"
-approval_policy = "on-request"
-# 高风险：仅在完全理解风险时才改为 approval_policy = "never"
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+# 正常模式：
+# sandbox_mode = "workspace-write"
+# approval_policy = "on-request"
 
 [model_providers.OpenAI]
 name = "OpenAI"
@@ -156,7 +158,7 @@ notepad (Join-Path $codexHome 'auth.json')
 
 ```json
 {
-  "OPENAI_API_KEY": "sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+  "OPENAI_API_KEY": "cr_xxxxxxxxxxxxxxxxxxxxxxxx"
 }
 ```
 
@@ -176,21 +178,22 @@ notepad (Join-Path $codexHome 'auth.json')
 
 ## ✅ 验证配置
 
-### 测试 1: 检查环境变量
+### 测试 1: 检查认证文件
 
 PowerShell:
 
 ```powershell
-echo $env:CRS_OAI_KEY
+$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+Get-Content (Join-Path $codexHome 'auth.json')
 ```
 
 命令提示符（cmd）:
 
 ```cmd
-echo %CRS_OAI_KEY%
+type "%USERPROFILE%\.codex\auth.json"
 ```
 
-应该输出完整的 API Key（以 `cr_` 开头）。
+应该能看到 `OPENAI_API_KEY` 已写入管理员提供的 CRS 2.0 token。
 
 ### 测试 2: 检查配置文件
 
@@ -235,9 +238,8 @@ codex "写一个 Python 函数计算斐波那契数列"
 ```
 □ Codex 配置目录已确认：优先使用 CODEX_HOME，未设置则使用 %USERPROFILE%\.codex
 □ config.toml 已创建并配置正确的 base_url
-□ auth.json 已创建并设置 OPENAI_API_KEY 为 null
-□ CRS_OAI_KEY 已写入用户环境变量或在当前会话临时设置
-□ 重开终端后 echo CRS_OAI_KEY 能显示正确的 API Key
+□ auth.json 已创建并写入 OPENAI_API_KEY
+□ 如使用 ASCII 安全目录，CODEX_HOME 已指向对应 .codex 目录
 □ codex "Hello" 测试成功
 ```
 
@@ -298,11 +300,12 @@ model_reasoning_effort = "medium"
 
 **排查步骤**：
 
-1. 检查环境变量是否设置：
+1. 检查 `auth.json` 是否写入 token：
    ```powershell
-   echo $env:CRS_OAI_KEY
+   $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+   Get-Content (Join-Path $codexHome 'auth.json')
    ```
-2. 若你刚写入用户环境变量，请确认 **重开终端** 后再试。
+2. 确认 `config.toml` 使用 OpenAI-compatible 配置。
 3. 仍失败请联系管理员更换 Key。
 
 ---
@@ -358,11 +361,8 @@ echo "问题" | codex
 ```
 %USERPROFILE%\.codex\
 ├── config.toml       # 主配置（服务器地址、模型）
-├── auth.json         # 认证配置（设为 null）
+├── auth.json         # 认证配置（OPENAI_API_KEY）
 └── ...               # 其他自动生成的文件
-
-用户环境变量:
-  CRS_OAI_KEY          # CRS API Key
 ```
 
 ---
@@ -387,13 +387,13 @@ echo "问题" | codex
 - 优先使用 `CODEX_HOME`，未设置时使用 `%USERPROFILE%\.codex`
 - 设置 `base_url` 为 CRS 服务器地址
 - 配置 `model` 和 `model_reasoning_effort`
-- 指定 `env_key = "CRS_OAI_KEY"`
+- 使用 `model_provider = "OpenAI"` 和 `requires_openai_auth = true`
 
 ### 2. Codex 配置目录里的 `auth.json`
-- 设置 `"OPENAI_API_KEY": null`
+- 写入 `"OPENAI_API_KEY": "你的密钥"`
 
-### 3. 用户环境变量 `CRS_OAI_KEY`
-- 推荐使用 `[Environment]::SetEnvironmentVariable(..., "User")` 写入用户环境变量
+### 3. 可选 `CODEX_HOME`
+- 仅当配置目录不是默认 `%USERPROFILE%\.codex` 时设置
 - 写入用户环境变量后需要重开终端生效
 
 ---
