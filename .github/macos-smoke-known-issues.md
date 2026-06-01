@@ -234,3 +234,11 @@ The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `
   the visible tail log stopped at `log_ok "Auth file updated for CRS 2.0 / OpenAI-compatible mode"`, and the final traced commands were the `[[ ... ]]` tests inside `codex_log_emit()`. On the GitHub macOS runner bash, `set -e` was still sensitive to a false last condition inside `if cond1 && cond2; then ... fi`, even though the branch was intentionally skipped.
 - Current mitigation in the smoke branch:
   `codex_log_emit()` now uses nested `if` blocks instead of `if cond1 && cond2`, and ends with `return 0`, so normal console logging cannot abort the installer.
+
+### 27. Empty array expansion at a function call site is worth guarding explicitly in CI bash compatibility paths
+
+- Observed on 2026-06-01 while chasing the remaining `Apply CRS 2.0 config only` failure after the logging helper was hardened.
+- Symptom:
+  the last visible installer output had already passed all CRS file writes, and the next command after the final `log_ok` was `remove_crs_backups_after_success "${backup_paths[@]}"`. On the macOS runner shell, treating the empty backup list explicitly is safer than relying on empty-array call semantics under strict mode.
+- Current mitigation in the smoke branch:
+  `configure_crs()` now calls `remove_crs_backups_after_success` only when `backup_paths` is non-empty.

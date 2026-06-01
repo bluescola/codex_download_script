@@ -1179,7 +1179,9 @@ CFG
   log_ok "Wrote: $config_path"
   log_ok "Wrote: $auth_path"
   log_ok "Auth file updated for CRS 2.0 / OpenAI-compatible mode"
-  remove_crs_backups_after_success "${backup_paths[@]}"
+  if [[ "${#backup_paths[@]}" -gt 0 ]]; then
+    remove_crs_backups_after_success "${backup_paths[@]}"
+  fi
 }
 
 configure_no_proxy() {
