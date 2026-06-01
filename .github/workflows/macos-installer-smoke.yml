@@ -200,22 +200,11 @@ jobs:
             echo "::group::apply-crs-config.log"
             cat "$log_file" || true
             echo "::endgroup::"
-            python3 - "$log_file" <<'PY'
-            import sys
-            from pathlib import Path
-
-            path = Path(sys.argv[1])
-            try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            except FileNotFoundError:
-                lines = ["log file missing"]
-
-            if not lines:
-                lines = ["log file is empty"]
-
-            for line in reversed(lines[-12:]):
-                print(f"::error::{line}")
-            PY
+            if [[ -f "$log_file" ]]; then
+              tail -n 12 "$log_file" | sed 's/^/::error::/' || true
+            else
+              echo "::error::log file missing: $log_file"
+            fi
             exit 1
           fi
 
@@ -325,22 +314,11 @@ jobs:
             echo "::group::verify-crs-artifacts.log"
             cat "$verify_log" || true
             echo "::endgroup::"
-            python3 - "$verify_log" <<'PY'
-            import sys
-            from pathlib import Path
-
-            path = Path(sys.argv[1])
-            try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            except FileNotFoundError:
-                lines = ["verify log missing"]
-
-            if not lines:
-                lines = ["verify log is empty"]
-
-            for line in lines[-40:]:
-                print(f"::error::{line}")
-            PY
+            if [[ -f "$verify_log" ]]; then
+              tail -n 40 "$verify_log" | sed 's/^/::error::/' || true
+            else
+              echo "::error::verify log missing: $verify_log"
+            fi
             exit 1
           fi
 
@@ -480,22 +458,11 @@ jobs:
             echo "::group::verify-managed-shell.log"
             cat "$verify_log" || true
             echo "::endgroup::"
-            python3 - "$verify_log" <<'PY'
-            import sys
-            from pathlib import Path
-
-            path = Path(sys.argv[1])
-            try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            except FileNotFoundError:
-                lines = ["verify log missing"]
-
-            if not lines:
-                lines = ["verify log is empty"]
-
-            for line in lines[-40:]:
-                print(f"::error::{line}")
-            PY
+            if [[ -f "$verify_log" ]]; then
+              tail -n 40 "$verify_log" | sed 's/^/::error::/' || true
+            else
+              echo "::error::verify log missing: $verify_log"
+            fi
             exit 1
           fi
 
@@ -544,22 +511,11 @@ jobs:
             echo "::group::verify-managed-no-proxy.log"
             cat "$verify_log" || true
             echo "::endgroup::"
-            python3 - "$verify_log" <<'PY'
-            import sys
-            from pathlib import Path
-
-            path = Path(sys.argv[1])
-            try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            except FileNotFoundError:
-                lines = ["verify log missing"]
-
-            if not lines:
-                lines = ["verify log is empty"]
-
-            for line in lines[-40:]:
-                print(f"::error::{line}")
-            PY
+            if [[ -f "$verify_log" ]]; then
+              tail -n 40 "$verify_log" | sed 's/^/::error::/' || true
+            else
+              echo "::error::verify log missing: $verify_log"
+            fi
             exit 1
           fi
 

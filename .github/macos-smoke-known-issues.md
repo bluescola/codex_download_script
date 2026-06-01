@@ -219,3 +219,10 @@ The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `
 - `config.toml` values for OpenAI-compatible Responses mode
 - `auth.json` token write
 - `NO_PROXY` and `no_proxy` updates for the CRS host and port
+### 25. Failure-log replay helpers inside workflow steps should avoid nested Python heredocs
+
+- Observed on 2026-06-01 after run `26732658586` returned `Process completed with exit code 2.` in `Verify CRS 2.0 artifacts`.
+- Symptom:
+  the step body itself was valid, but the failure branch used an indented `python3 - "$verify_log" <<'PY'` block. Bash does not accept an indented heredoc terminator, so the log-replay path masked the real smoke failure with a shell parse error.
+- Current mitigation in the smoke branch:
+  failure-log replay now uses plain shell (`tail | sed 's/^/::error::/'`) instead of nested Python heredocs inside workflow `run: |` blocks.
