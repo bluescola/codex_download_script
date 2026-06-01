@@ -259,8 +259,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          verify_log="$RUNNER_TEMP/verify-crs-artifacts.log"
-          if ! bash <<'BASH' >"$verify_log" 2>&1
+          verify_script="$RUNNER_TEMP/verify-crs-artifacts.sh"
+          cat >"$verify_script" <<'BASH'
           set -euo pipefail
 
           require_eq() {
@@ -318,8 +318,10 @@ jobs:
           printf '%s\n' "$config_path" > "$RUNNER_TEMP/codex-config-path.txt"
           printf '%s\n' "$auth_path" > "$RUNNER_TEMP/codex-auth-path.txt"
           echo "CRS artifact verification passed."
-BASH
-          then
+          BASH
+
+          verify_log="$RUNNER_TEMP/verify-crs-artifacts.log"
+          if ! bash "$verify_script" >"$verify_log" 2>&1; then
             echo "::group::verify-crs-artifacts.log"
             cat "$verify_log" || true
             echo "::endgroup::"
