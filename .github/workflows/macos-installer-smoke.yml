@@ -457,7 +457,7 @@ jobs:
             exit 1
           fi
           echo "Managed shell verification passed."
-BASH
+          BASH
           then
             echo "::group::verify-managed-shell.log"
             cat "$verify_log" || true

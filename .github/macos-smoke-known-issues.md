@@ -153,6 +153,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   verify now extracts only the installer-managed PATH and NO_PROXY blocks from the shell profile files and evaluates them inside a clean `bash --noprofile --norc` environment.
 
+### 18. Nested heredoc terminators inside a workflow `run: |` block are indentation-sensitive
+
+- Observed on 2026-06-01 in run `26731310354`.
+- Symptom:
+  GitHub rejected the workflow before creating any jobs, with an `Invalid workflow file` error pointing at the inner `BASH` terminator line.
+- Fix:
+  keep the nested heredoc terminator aligned with the surrounding script indentation expected by the workflow block so the YAML/run-script boundary remains valid.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
