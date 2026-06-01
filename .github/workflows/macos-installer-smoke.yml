@@ -309,15 +309,15 @@ jobs:
           if [[ -z "$codex_home" ]]; then
             codex_home="$(
               python3 - <<'PY'
-              from pathlib import Path
+from pathlib import Path
 
-              candidates = [Path.home() / ".codex"]
-              candidates.extend(sorted(Path("/Users/Shared").glob("Codex-*/.codex")))
+candidates = [Path.home() / ".codex"]
+candidates.extend(sorted(Path("/Users/Shared").glob("Codex-*/.codex")))
 
-              for candidate in candidates:
-                  if (candidate / "config.toml").is_file() and (candidate / "auth.json").is_file():
-                      print(candidate)
-                      break
+for candidate in candidates:
+    if (candidate / "config.toml").is_file() and (candidate / "auth.json").is_file():
+        print(candidate)
+        break
               PY
             )"
             if [[ -n "$codex_home" ]]; then
@@ -344,13 +344,13 @@ jobs:
           require_file_contains 'requires_openai_auth = true' "$config_path" "config requires_openai_auth"
           auth_token="$(
             python3 - "$auth_path" <<'PY'
-          import json
-          import sys
+import json
+import sys
 
-          with open(sys.argv[1], "r", encoding="utf-8") as fh:
-              auth = json.load(fh)
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    auth = json.load(fh)
 
-          print(auth.get("OPENAI_API_KEY", ""))
+print(auth.get("OPENAI_API_KEY", ""))
           PY
           )"
           require_eq "crs2-smoke-token" "$auth_token" "auth OPENAI_API_KEY"

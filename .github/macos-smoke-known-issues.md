@@ -185,6 +185,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   the verification path is now split into separate steps for CRS artifacts, managed node/codex shell state, and managed NO_PROXY shell state so the failing surface is naturally exposed even when log annotations are poor.
 
+### 22. Python heredocs inside workflow shell blocks must not keep shell indentation
+
+- Observed on 2026-06-01 while reproducing the `Verify CRS 2.0 artifacts` failure from run `26732318764`.
+- Symptom:
+  an inline `python3 - <<'PY'` block inside the workflow carried leading shell indentation into Python stdin, which produced `IndentationError: unexpected indent` before any smoke assertion ran.
+- Fix:
+  keep the Python body left-aligned inside the heredoc content, even when the surrounding workflow `run: |` block is indented.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
