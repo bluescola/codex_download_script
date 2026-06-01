@@ -262,19 +262,25 @@ jobs:
           source ~/.bash_profile 2>/dev/null || true
           source ~/.bashrc 2>/dev/null || true
           node24_prefix="$(brew --prefix node@24)"
-          if [[ -n "${CODEX_HOME:-}" ]]; then
-            codex_home="$CODEX_HOME"
-          elif [[ -f "$HOME/.zprofile" ]] && grep -qE '^[[:space:]]*export[[:space:]]+CODEX_HOME=' "$HOME/.zprofile"; then
-            codex_home="$(sed -n 's/^[[:space:]]*export[[:space:]]\+CODEX_HOME="\{0,1\}\(.*\)"\{0,1\}[[:space:]]*$/\1/p' "$HOME/.zprofile" | tail -n 1)"
-          elif [[ -f "$HOME/.bash_profile" ]] && grep -qE '^[[:space:]]*export[[:space:]]+CODEX_HOME=' "$HOME/.bash_profile"; then
-            codex_home="$(sed -n 's/^[[:space:]]*export[[:space:]]\+CODEX_HOME="\{0,1\}\(.*\)"\{0,1\}[[:space:]]*$/\1/p' "$HOME/.bash_profile" | tail -n 1)"
-          else
-            ascii_safe_home="/Users/Shared/Codex-$(id -u)/.codex"
-            if [[ -f "$ascii_safe_home/config.toml" ]]; then
-              codex_home="$ascii_safe_home"
-            else
-              codex_home="$HOME/.codex"
-            fi
+          shopt -s nullglob
+          codex_home=""
+          candidates=()
+          [[ -n "${CODEX_HOME:-}" ]] && candidates+=("$CODEX_HOME")
+          candidates+=("$HOME/.codex")
+          for shared_home in /Users/Shared/Codex-*/.codex; do
+            candidates+=("$shared_home")
+          done
+          for candidate in "${candidates[@]}"; do
+            [[ -f "$candidate/config.toml" && -f "$candidate/auth.json" ]] || continue
+            codex_home="$candidate"
+            break
+          done
+          if [[ -z "$codex_home" ]]; then
+            echo "::error::No CRS artifact directory found in expected candidates: ${candidates[*]}"
+            ls -la "$HOME" || true
+            ls -la /Users/Shared || true
+            find "$HOME" /Users/Shared -maxdepth 4 \( -name config.toml -o -name auth.json \) 2>/dev/null || true
+            exit 1
           fi
           config_path="$codex_home/config.toml"
           auth_path="$codex_home/auth.json"
