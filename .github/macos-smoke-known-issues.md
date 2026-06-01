@@ -242,3 +242,11 @@ The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `
   the last visible installer output had already passed all CRS file writes, and the next command after the final `log_ok` was `remove_crs_backups_after_success "${backup_paths[@]}"`. On the macOS runner shell, treating the empty backup list explicitly is safer than relying on empty-array call semantics under strict mode.
 - Current mitigation in the smoke branch:
   `configure_crs()` now calls `remove_crs_backups_after_success` only when `backup_paths` is non-empty.
+
+### 28. Nested `python3 - <<'PY'` inside command substitution is another fragile parsing boundary in workflow `run: |` blocks
+
+- Observed on 2026-06-01 while run `26733500773` still failed after the installer body had already completed its CRS write path.
+- Symptom:
+  after the installer returned, the next workflow statement was a command substitution that rediscovered `CODEX_HOME` via `python3 - <<'PY'`. This is the same class of nested-heredoc surface that already caused misleading failures elsewhere in the smoke workflow.
+- Current mitigation in the smoke branch:
+  the `CODEX_HOME` rediscovery helper now uses `python3 -c` instead of an inline Python heredoc.

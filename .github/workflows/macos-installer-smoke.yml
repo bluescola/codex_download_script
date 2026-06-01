@@ -209,17 +209,7 @@ jobs:
           fi
 
           codex_home_path="$(
-            python3 - <<'PY'
-            from pathlib import Path
-
-            candidates = [Path.home() / ".codex"]
-            candidates.extend(sorted(Path("/Users/Shared").glob("Codex-*/.codex")))
-
-            for candidate in candidates:
-                if (candidate / "config.toml").is_file() and (candidate / "auth.json").is_file():
-                    print(candidate)
-                    break
-            PY
+            python3 -c 'from pathlib import Path; candidates=[Path.home()/".codex", *sorted(Path("/Users/Shared").glob("Codex-*/.codex"))]; print(next((str(candidate) for candidate in candidates if (candidate/"config.toml").is_file() and (candidate/"auth.json").is_file()), ""))'
           )"
           if [[ -z "$codex_home_path" ]]; then
             echo "::error::Unable to locate CRS artifact directory after config step."
