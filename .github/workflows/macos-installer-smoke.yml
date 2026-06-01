@@ -262,8 +262,23 @@ jobs:
           source ~/.bash_profile 2>/dev/null || true
           source ~/.bashrc 2>/dev/null || true
           node24_prefix="$(brew --prefix node@24)"
-          config_path="${CODEX_HOME:-$HOME/.codex}/config.toml"
-          auth_path="${CODEX_HOME:-$HOME/.codex}/auth.json"
+          if [[ -n "${CODEX_HOME:-}" ]]; then
+            codex_home="$CODEX_HOME"
+          elif [[ -f "$HOME/.zprofile" ]] && grep -qE '^[[:space:]]*export[[:space:]]+CODEX_HOME=' "$HOME/.zprofile"; then
+            codex_home="$(sed -n 's/^[[:space:]]*export[[:space:]]\+CODEX_HOME="\{0,1\}\(.*\)"\{0,1\}[[:space:]]*$/\1/p' "$HOME/.zprofile" | tail -n 1)"
+          elif [[ -f "$HOME/.bash_profile" ]] && grep -qE '^[[:space:]]*export[[:space:]]+CODEX_HOME=' "$HOME/.bash_profile"; then
+            codex_home="$(sed -n 's/^[[:space:]]*export[[:space:]]\+CODEX_HOME="\{0,1\}\(.*\)"\{0,1\}[[:space:]]*$/\1/p' "$HOME/.bash_profile" | tail -n 1)"
+          else
+            ascii_safe_home="/Users/Shared/Codex-$(id -u)/.codex"
+            if [[ -f "$ascii_safe_home/config.toml" ]]; then
+              codex_home="$ascii_safe_home"
+            else
+              codex_home="$HOME/.codex"
+            fi
+          fi
+          config_path="$codex_home/config.toml"
+          auth_path="$codex_home/auth.json"
+          echo "Resolved CODEX_HOME=${codex_home}"
           node -v
           npm -v
           codex --version
