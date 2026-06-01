@@ -169,6 +169,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   the managed-shell verification body is now written to a temporary script file and executed explicitly, instead of being embedded directly as a command heredoc inside the `if ! ...` statement.
 
+### 20. Plain `tail | sed 's/^/::error::/'` was still not reliably surfacing verify failures as annotations
+
+- Observed on 2026-06-01 after run `26731825518`.
+- Symptom:
+  the verify step still failed, but GitHub annotations continued to collapse to a generic `Process completed with exit code 1.` line.
+- Current mitigation in the smoke branch:
+  verify failure now replays the last lines of `verify-managed-shell.log` through a small Python emitter so each line is written back as an explicit `::error::...` annotation.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
