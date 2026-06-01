@@ -288,16 +288,19 @@ jobs:
             fi
           }
 
-          set +u
-          source ~/.zprofile 2>/dev/null || true
-          source ~/.zshrc 2>/dev/null || true
-          source ~/.bash_profile 2>/dev/null || true
-          source ~/.bashrc 2>/dev/null || true
-          set -u
+          append_managed_block() {
+            local file="$1"
+            local start="$2"
+            local end="$3"
+            [[ -f "$file" ]] || return 0
+            awk -v start="$start" -v end="$end" '
+              index($0, start) { capture=1; next }
+              index($0, end) { capture=0; next }
+              capture { print }
+            ' "$file" >> "$managed_env"
+          }
+
           node24_prefix="$(brew --prefix node@24)"
-          echo "PATH after profile load: $PATH"
-          echo "NO_PROXY after profile load: ${NO_PROXY:-}"
-          echo "no_proxy after profile load: ${no_proxy:-}"
           codex_home="${CODEX_SMOKE_HOME:-}"
           if [[ -z "$codex_home" && -f "$GITHUB_WORKSPACE/.codex-smoke-home" ]]; then
             codex_home="$(tr -d '\r' < "$GITHUB_WORKSPACE/.codex-smoke-home")"
@@ -331,29 +334,7 @@ jobs:
           fi
           config_path="$codex_home/config.toml"
           auth_path="$codex_home/auth.json"
-          node_path="$(command -v node || true)"
-          npm_path="$(command -v npm || true)"
-          codex_path="$(command -v codex || true)"
-          require_nonempty "$node_path" "command -v node"
-          require_nonempty "$npm_path" "command -v npm"
-          require_nonempty "$codex_path" "command -v codex"
           echo "Resolved CODEX_HOME=${codex_home}"
-          node_version="$(node -v 2>&1)" || { echo "::error::node -v failed"; exit 1; }
-          npm_version="$(npm -v 2>&1)" || { echo "::error::npm -v failed"; exit 1; }
-          codex_version="$(codex --version 2>&1)" || { echo "::error::codex --version failed"; exit 1; }
-          echo "$node_version"
-          echo "$npm_version"
-          echo "$codex_version"
-          echo "$node_path"
-          echo "$npm_path"
-          echo "$codex_path"
-          require_eq "$node24_prefix/bin/node" "$node_path" "which node"
-          require_eq "$node24_prefix/bin/npm" "$npm_path" "which npm"
-          require_eq "$node24_prefix/bin/codex" "$codex_path" "which codex"
-          node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
-          require_eq "24" "$node_major" "node major version"
-          node24_path_count="$(printf '%s' "$PATH" | tr ':' '\n' | awk -v target="$node24_prefix/bin" '$0 == target { count++ } END { print count + 0 }')"
-          require_eq "1" "$node24_path_count" "node24 PATH entry count"
           test -f "$config_path" || { echo "::error::missing config file: $config_path"; exit 1; }
           test -f "$auth_path" || { echo "::error::missing auth file: $auth_path"; exit 1; }
           require_file_contains 'model_provider = "OpenAI"' "$config_path" "config model_provider"
@@ -373,16 +354,116 @@ jobs:
           PY
           )"
           require_eq "crs2-smoke-token" "$auth_token" "auth OPENAI_API_KEY"
+
+          managed_env="$RUNNER_TEMP/codex-managed-env.sh"
+          : > "$managed_env"
+          found_node_path_block=0
+          found_no_proxy_block=0
+
+          for rc_file in "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+            if [[ -f "$rc_file" ]] && grep -Fq '# >>> codex homebrew node path >>>' "$rc_file"; then
+              append_managed_block "$rc_file" '# >>> codex homebrew node path >>>' '# <<< codex homebrew node path <<<'
+              found_node_path_block=1
+            fi
+            if [[ -f "$rc_file" ]] && grep -Fq '# >>> codex no_proxy >>>' "$rc_file"; then
+              append_managed_block "$rc_file" '# >>> codex no_proxy >>>' '# <<< codex no_proxy <<<'
+              found_no_proxy_block=1
+            fi
+          done
+
+          if [[ "$codex_home" != "$HOME/.codex" ]]; then
+            printf 'export CODEX_HOME=%q\n' "$codex_home" >> "$managed_env"
+          fi
+
+          require_eq "1" "$found_node_path_block" "managed node PATH block found"
+          require_eq "1" "$found_no_proxy_block" "managed NO_PROXY block found"
+          require_nonempty "$(cat "$managed_env")" "managed smoke env script"
+          echo "::group::managed-env.sh"
+          cat "$managed_env"
+          echo "::endgroup::"
+
+          verify_log="$RUNNER_TEMP/verify-managed-shell.log"
+          if ! NODE24_PREFIX="$node24_prefix" \
+               EXPECTED_CODEX_HOME="$codex_home" \
+               CONFIG_PATH="$config_path" \
+               AUTH_PATH="$auth_path" \
+               MANAGED_ENV="$managed_env" \
+               bash --noprofile --norc >"$verify_log" 2>&1 <<'BASH'
+          set -euo pipefail
+
+          require_eq() {
+            local expected="$1"
+            local actual="$2"
+            local label="$3"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error::$label expected [$expected] but got [$actual]"
+              exit 1
+            fi
+          }
+
+          require_nonempty() {
+            local actual="$1"
+            local label="$2"
+            if [[ -z "$actual" ]]; then
+              echo "::error::$label is empty"
+              exit 1
+            fi
+          }
+
+          source "$MANAGED_ENV"
+
+          echo "PATH after managed env: $PATH"
+          echo "NO_PROXY after managed env: ${NO_PROXY:-}"
+          echo "no_proxy after managed env: ${no_proxy:-}"
+
+          node_path="$(command -v node || true)"
+          npm_path="$(command -v npm || true)"
+          codex_path="$(command -v codex || true)"
+          require_nonempty "$node_path" "command -v node"
+          require_nonempty "$npm_path" "command -v npm"
+          require_nonempty "$codex_path" "command -v codex"
+
+          node_version="$(node -v 2>&1)" || { echo "::error::node -v failed"; exit 1; }
+          npm_version="$(npm -v 2>&1)" || { echo "::error::npm -v failed"; exit 1; }
+          codex_version="$(codex --version 2>&1)" || { echo "::error::codex --version failed"; exit 1; }
+          echo "$node_version"
+          echo "$npm_version"
+          echo "$codex_version"
+          echo "$node_path"
+          echo "$npm_path"
+          echo "$codex_path"
+
+          require_eq "$NODE24_PREFIX/bin/node" "$node_path" "which node"
+          require_eq "$NODE24_PREFIX/bin/npm" "$npm_path" "which npm"
+          require_eq "$NODE24_PREFIX/bin/codex" "$codex_path" "which codex"
+          node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
+          require_eq "24" "$node_major" "node major version"
+          node24_path_count="$(printf '%s' "$PATH" | tr ':' '\n' | awk -v target="$NODE24_PREFIX/bin" '$0 == target { count++ } END { print count + 0 }')"
+          require_eq "1" "$node24_path_count" "node24 PATH entry count"
+          if [[ "$EXPECTED_CODEX_HOME" != "$HOME/.codex" ]]; then
+            require_eq "$EXPECTED_CODEX_HOME" "${CODEX_HOME:-}" "managed CODEX_HOME"
+          fi
+
           require_eq "${NO_PROXY:-}" "${no_proxy:-}" "NO_PROXY parity"
-          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx 'localhost' || { echo "::error::NO_PROXY missing localhost"; exit 1; }
-          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1' || { echo "::error::NO_PROXY missing 127.0.0.1"; exit 1; }
-          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1:18080' || { echo "::error::NO_PROXY missing 127.0.0.1:18080"; exit 1; }
-          if printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '3.27.43.117'; then
+          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx 'localhost' >/dev/null || { echo "::error::NO_PROXY missing localhost"; exit 1; }
+          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1' >/dev/null || { echo "::error::NO_PROXY missing 127.0.0.1"; exit 1; }
+          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1:18080' >/dev/null || { echo "::error::NO_PROXY missing 127.0.0.1:18080"; exit 1; }
+          if printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '3.27.43.117' >/dev/null; then
             echo "::error::NO_PROXY still contains legacy host 3.27.43.117"
             exit 1
           fi
-          if printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '3.27.43.117:10086'; then
+          if printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '3.27.43.117:10086' >/dev/null; then
             echo "::error::NO_PROXY still contains legacy host:port 3.27.43.117:10086"
             exit 1
           fi
-          echo "NO_PROXY=${NO_PROXY:-}"
+          echo "Managed shell verification passed."
+BASH
+          then
+            echo "::group::verify-managed-shell.log"
+            cat "$verify_log" || true
+            echo "::endgroup::"
+            tail -n 40 "$verify_log" | sed 's/^/::error::/' || true
+            exit 1
+          fi
+
+          cat "$verify_log"

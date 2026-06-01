@@ -145,6 +145,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   verify now temporarily disables `nounset` while loading profile files, then restores it before running the actual smoke assertions.
 
+### 17. Full runner shell profiles are too noisy a surface for deterministic smoke verification
+
+- Observed on 2026-06-01 after runs `26730939122` and `26731058840` still failed inside verify without stable, actionable annotations.
+- Rationale:
+  even after hardening `nounset`, sourcing the entire runner profile set still mixes GitHub-hosted defaults with our installer-managed exports, which makes the smoke result harder to attribute to the installer itself.
+- Current mitigation in the smoke branch:
+  verify now extracts only the installer-managed PATH and NO_PROXY blocks from the shell profile files and evaluates them inside a clean `bash --noprofile --norc` environment.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
