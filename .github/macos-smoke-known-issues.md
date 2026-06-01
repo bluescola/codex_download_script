@@ -121,6 +121,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   on config-step failure, the workflow now emits the last 12 installer log lines in reverse order so GitHub annotations show the newest lines first.
 
+### 14. `GITHUB_ENV` propagation was not sufficient as the only carrier for the discovered CRS artifact path
+
+- Observed on 2026-06-01 in run `26730645012`.
+- Symptom:
+  `Apply CRS 2.0 config only` succeeded, but `Verify commands and CRS 2.0 artifacts` still saw `CODEX_SMOKE_HOME` as empty on both `macos-14` and `macos-15`.
+- Current mitigation in the smoke branch:
+  the config step now also writes the resolved `.codex` path into a workspace marker file, and the verify step can recover or rediscover the path before running assertions.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:

@@ -237,6 +237,7 @@ jobs:
             find "$HOME" /Users/Shared -maxdepth 4 \( -name config.toml -o -name auth.json \) 2>/dev/null || true
             exit 1
           fi
+          printf '%s\n' "$codex_home_path" > "$GITHUB_WORKSPACE/.codex-smoke-home"
           echo "CODEX_SMOKE_HOME=$codex_home_path" >> "$GITHUB_ENV"
           echo "Resolved smoke CODEX_HOME=$codex_home_path"
 
@@ -284,9 +285,32 @@ jobs:
           source ~/.bashrc 2>/dev/null || true
           node24_prefix="$(brew --prefix node@24)"
           codex_home="${CODEX_SMOKE_HOME:-}"
+          if [[ -z "$codex_home" && -f "$GITHUB_WORKSPACE/.codex-smoke-home" ]]; then
+            codex_home="$(tr -d '\r' < "$GITHUB_WORKSPACE/.codex-smoke-home")"
+            echo "Recovered CODEX_HOME from workspace marker: $codex_home"
+          fi
+          if [[ -z "$codex_home" ]]; then
+            codex_home="$(
+              python3 - <<'PY'
+              from pathlib import Path
+
+              candidates = [Path.home() / ".codex"]
+              candidates.extend(sorted(Path("/Users/Shared").glob("Codex-*/.codex")))
+
+              for candidate in candidates:
+                  if (candidate / "config.toml").is_file() and (candidate / "auth.json").is_file():
+                      print(candidate)
+                      break
+              PY
+            )"
+            if [[ -n "$codex_home" ]]; then
+              echo "Rediscovered CODEX_HOME during verify: $codex_home"
+            fi
+          fi
           if [[ -z "$codex_home" ]]; then
             echo "::error::CODEX_SMOKE_HOME is empty before verify."
             ls -la "$HOME" || true
+            ls -la "$GITHUB_WORKSPACE" || true
             ls -la /Users/Shared || true
             find "$HOME" /Users/Shared -maxdepth 4 \( -name config.toml -o -name auth.json \) 2>/dev/null || true
             exit 1
