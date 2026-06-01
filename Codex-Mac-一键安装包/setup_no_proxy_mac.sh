@@ -3,7 +3,9 @@ set -euo pipefail
 
 # Codex NO_PROXY bypass setup (macOS)
 # - Reads base_url from CODEX_HOME/config.toml or ~/.codex/config.toml.
-# - Rebuilds NO_PROXY/no_proxy with CRS host, host:port, localhost, and 127.0.0.1 only.
+# - Removes legacy fixed IPs (3.27.43.117*) from existing NO_PROXY.
+# - Adds CRS host, host:port, localhost, and 127.0.0.1 to NO_PROXY/no_proxy.
+# - Preserves user-defined NO_PROXY entries.
 # - Persists across reboot by updating shell profiles and installing a LaunchAgent.
 # - Idempotent: safe to run multiple times.
 
@@ -12,6 +14,9 @@ log() {
 }
 
 required=("localhost" "127.0.0.1")
+
+# Legacy fixed IPs from older installer versions - strip these on every run.
+legacy_fixed=("3.27.43.117" "3.27.43.117:10086")
 
 append_crs_base_url_items() {
   local config_path="${CODEX_HOME:-$HOME/.codex}/config.toml"
@@ -37,18 +42,75 @@ log "Current NO_PROXY/no_proxy:"
 echo "  NO_PROXY=${NO_PROXY:-}"
 echo "  no_proxy=${no_proxy:-}"
 
+trim() {
+  echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
 contains() {
   local needle="$1"; shift
   local item
+  [[ "$#" -gt 0 ]] || return 1
   for item in "$@"; do
     [[ "$item" == "$needle" ]] && return 0
   done
   return 1
 }
 
+detect_login_shell() {
+  local detected=""
+  if command -v dscl >/dev/null 2>&1; then
+    detected="$(dscl . -read "/Users/$(id -un)" UserShell 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
+  fi
+  if [[ -z "$detected" ]]; then
+    detected="${SHELL:-}"
+  fi
+  if [[ -z "$detected" ]]; then
+    detected="/bin/zsh"
+  fi
+  printf '%s\n' "$detected"
+}
+
+profile_shell_kind() {
+  case "$(basename "$(detect_login_shell)")" in
+    bash)
+      printf 'bash\n'
+      ;;
+    *)
+      printf 'zsh\n'
+      ;;
+  esac
+}
+
+profile_files_for_persist() {
+  case "$(profile_shell_kind)" in
+    bash)
+      printf '%s\n' "$HOME/.bash_profile" "$HOME/.bashrc"
+      ;;
+    *)
+      printf '%s\n' "$HOME/.zprofile" "$HOME/.zshrc"
+      ;;
+  esac
+}
+
 items=()
+for current in "${NO_PROXY:-}" "${no_proxy:-}"; do
+  [[ -n "$current" ]] || continue
+  IFS=',' read -r -a parts <<< "${current}"
+  for p in "${parts[@]}"; do
+    p="$(trim "$p")"
+    [[ -z "$p" ]] && continue
+    if contains "$p" "${legacy_fixed[@]}"; then
+      log "Removing legacy fixed IP: $p"
+      continue
+    fi
+    if ((${#items[@]} == 0)) || ! contains "$p" "${items[@]}"; then
+      items+=("$p")
+    fi
+  done
+done
+
 for v in "${required[@]}"; do
-  if contains "$v" "${items[@]}"; then
+  if ((${#items[@]} > 0)) && contains "$v" "${items[@]}"; then
     log "Already present: $v"
   else
     log "Adding: $v"
@@ -57,13 +119,15 @@ for v in "${required[@]}"; do
 done
 
 new=""
-for i in "${items[@]}"; do
-  if [[ -z "$new" ]]; then
-    new="$i"
-  else
-    new="${new},${i}"
-  fi
-done
+if ((${#items[@]} > 0)); then
+  for i in "${items[@]}"; do
+    if [[ -z "$new" ]]; then
+      new="$i"
+    else
+      new="${new},${i}"
+    fi
+  done
+fi
 
 log "New NO_PROXY:"
 echo "  ${new}"
@@ -98,13 +162,12 @@ EOF
   log "Updated: $file"
 }
 
-# Persist for shells.
-upsert_block "$HOME/.zprofile"
-upsert_block "$HOME/.zshrc"
-[[ -f "$HOME/.bash_profile" ]] && upsert_block "$HOME/.bash_profile"
-[[ -f "$HOME/.bashrc" ]] && upsert_block "$HOME/.bashrc"
+# Persist for the user's login shell only.
+while IFS= read -r profile_file; do
+  upsert_block "$profile_file"
+done < <(profile_files_for_persist)
 
-# Best-effort: set for current GUI session too (apps launched AFTER this should inherit).
+# Best-effort: set for current GUI session too.
 if command -v launchctl >/dev/null 2>&1; then
   log "Setting launchctl environment (current login session)..."
   launchctl setenv NO_PROXY "$new" || true
@@ -175,8 +238,11 @@ log "Done."
 log "Recommended: open a NEW terminal to apply."
 log "To apply to the CURRENT shell (choose one):"
 echo "  # Option A (preferred): source your shell rc/profile file you just updated:"
-echo "  #   zsh : source ~/.zshrc    (or: source ~/.zprofile)"
-echo "  #   bash: source ~/.bashrc   (or: source ~/.bash_profile)"
+if [[ "$(profile_shell_kind)" == "bash" ]]; then
+  echo "  #   bash: source ~/.bashrc   (or: source ~/.bash_profile)"
+else
+  echo "  #   zsh : source ~/.zshrc    (or: source ~/.zprofile)"
+fi
 echo "  # Option B: export variables (temporary for this shell only):"
 echo "  export NO_PROXY=\"$new\""
 echo "  export no_proxy=\"\$NO_PROXY\""

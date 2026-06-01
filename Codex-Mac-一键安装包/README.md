@@ -16,7 +16,7 @@ bash install-codex-cli-mac.sh
 - 清理旧安装器写入的 npm prefix/cache 配置和默认 `CODEX_HOME` profile 导出。
 - 不长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`。
 - 写入 CRS 配置和 `auth.json`；写入失败时保留本次备份，成功后清理本次备份。
-- 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy，并覆盖终端和 GUI 会话。
+- 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy，按登录 shell 写入对应 zsh 或 bash profile，并覆盖终端和 GUI 会话。
 - HOME/TMPDIR 含非 ASCII 时使用 ASCII-safe 根目录。
 
 ## 常用参数

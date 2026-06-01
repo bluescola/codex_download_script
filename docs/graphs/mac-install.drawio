@@ -52,10 +52,10 @@
         <mxCell id="crs" value="CRS 配置&lt;br&gt;config.toml / auth.json" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff1e6;strokeColor=#d58b4c;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="625" y="825" width="240" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="launch" value="LaunchAgent / launchctl&lt;br&gt;GUI 会话环境" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="launch" value="LaunchAgent / launchctl&lt;br&gt;GUI 会话持久化" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7dc;strokeColor=#c7a447;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="910" y="825" width="220" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="noproxy" value="setup_no_proxy_mac.sh&lt;br&gt;NO_PROXY / no_proxy" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="noproxy" value="setup_no_proxy_mac.sh&lt;br&gt;合并 NO_PROXY/no_proxy&lt;br&gt;登录 shell profile" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f6ff;strokeColor=#6aa1ff;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="1170" y="825" width="220" height="80" as="geometry" />
         </mxCell>
         <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="entry" target="args"><mxGeometry relative="1" as="geometry" /></mxCell>
@@ -70,8 +70,8 @@
         <mxCell id="e10" value="--remove-system-codex" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#c7a447;strokeWidth=2;dashed=1;" edge="1" parent="1" source="system" target="codex"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="codex" target="cleanup"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="cleanup" target="nodepath"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="crs" target="launch"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="launch" target="noproxy"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="crs" target="noproxy"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="noproxy" target="launch"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="e15" value="写入前" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="crsbackup" target="crs"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8a8a8a;strokeWidth=2;" edge="1" parent="1" source="nodepath" target="crsbackup"><mxGeometry relative="1" as="geometry" /></mxCell>
       </root>

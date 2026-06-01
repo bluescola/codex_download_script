@@ -55,7 +55,7 @@
 8. 把 Codex 安装到 Homebrew `node@24` npm prefix。
 9. 清理旧 PATH 块、旧 `NPM_CONFIG_*` 和默认 `CODEX_HOME`，并把 `node@24/bin` 去重置顶写入 zsh/bash profile。
 10. 写入 CRS 配置和 `auth.json`。
-11. 调用 `setup_no_proxy_mac.sh` 写入 shell profile 和 LaunchAgent。
+11. 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy，按登录 shell 写入对应 zsh 或 bash profile，并更新 `launchctl` 和 LaunchAgent。
 
 ### Windows
 
@@ -94,13 +94,13 @@
 - 读取 CRS `base_url`，加入 host 和 host:port。
 - 固定加入 `localhost`、`127.0.0.1`。
 - 移除旧版固定 IP：`3.27.43.117`、`3.27.43.117:10086`。
-- 保留用户已有 NO_PROXY 项。
+- 保留用户已有项并去重。
 
 平台差异：
 
-- Linux 写 shell profile 和 `~/.config/environment.d/99-codex-no-proxy.conf`。
-- macOS 写 zsh/bash profile，并通过 `launchctl` 和 LaunchAgent 覆盖 GUI 会话。
-- Windows 写 User 环境变量，更新当前进程，并广播环境变更。
+- Linux 同时合并 `NO_PROXY` 和 `no_proxy`，写 shell profile 和 `~/.config/environment.d/99-codex-no-proxy.conf`。
+- macOS 同时合并 `NO_PROXY` 和 `no_proxy`，按登录 shell 只写对应的 zsh 或 bash profile，并通过 `launchctl` 和 LaunchAgent 覆盖 GUI 会话。
+- Windows 合并 User/Process 级 `NO_PROXY`，写 User 环境变量，更新当前进程，并广播环境变更；当前不维护小写 `no_proxy`。
 
 ## 日志级别
 
