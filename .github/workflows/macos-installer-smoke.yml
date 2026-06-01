@@ -255,7 +255,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify commands and CRS 2.0 artifacts
+      - name: Verify CRS 2.0 artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -354,11 +354,50 @@ jobs:
           PY
           )"
           require_eq "crs2-smoke-token" "$auth_token" "auth OPENAI_API_KEY"
+          printf '%s\n' "$codex_home" > "$RUNNER_TEMP/codex-home-path.txt"
+          printf '%s\n' "$config_path" > "$RUNNER_TEMP/codex-config-path.txt"
+          printf '%s\n' "$auth_path" > "$RUNNER_TEMP/codex-auth-path.txt"
+
+      - name: Build managed shell env
+        shell: bash
+        run: |
+          set -euo pipefail
+          require_eq() {
+            local expected="$1"
+            local actual="$2"
+            local label="$3"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error::$label expected [$expected] but got [$actual]"
+              exit 1
+            fi
+          }
+
+          require_nonempty() {
+            local actual="$1"
+            local label="$2"
+            if [[ -z "$actual" ]]; then
+              echo "::error::$label is empty"
+              exit 1
+            fi
+          }
 
           managed_env="$RUNNER_TEMP/codex-managed-env.sh"
           : > "$managed_env"
           found_node_path_block=0
           found_no_proxy_block=0
+          codex_home="$(tr -d '\r' < "$RUNNER_TEMP/codex-home-path.txt")"
+
+          append_managed_block() {
+            local file="$1"
+            local start="$2"
+            local end="$3"
+            [[ -f "$file" ]] || return 0
+            awk -v start="$start" -v end="$end" '
+              index($0, start) { capture=1; next }
+              index($0, end) { capture=0; next }
+              capture { print }
+            ' "$file" >> "$managed_env"
+          }
 
           for rc_file in "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
             if [[ -f "$rc_file" ]] && grep -Fq '# >>> codex homebrew node path >>>' "$rc_file"; then
@@ -382,6 +421,10 @@ jobs:
           cat "$managed_env"
           echo "::endgroup::"
 
+      - name: Verify managed node and codex shell
+        shell: bash
+        run: |
+          set -euo pipefail
           verify_script="$RUNNER_TEMP/verify-managed-shell.sh"
           cat >"$verify_script" <<'BASH'
           set -euo pipefail
@@ -438,7 +481,60 @@ jobs:
           if [[ "$EXPECTED_CODEX_HOME" != "$HOME/.codex" ]]; then
             require_eq "$EXPECTED_CODEX_HOME" "${CODEX_HOME:-}" "managed CODEX_HOME"
           fi
+          echo "Managed node/codex shell verification passed."
+          BASH
 
+          verify_log="$RUNNER_TEMP/verify-managed-shell.log"
+          if ! NODE24_PREFIX="$node24_prefix" \
+               EXPECTED_CODEX_HOME="$(tr -d '\r' < "$RUNNER_TEMP/codex-home-path.txt")" \
+               MANAGED_ENV="$managed_env" \
+               bash --noprofile --norc "$verify_script" >"$verify_log" 2>&1; then
+            echo "::group::verify-managed-shell.log"
+            cat "$verify_log" || true
+            echo "::endgroup::"
+            python3 - "$verify_log" <<'PY'
+            import sys
+            from pathlib import Path
+
+            path = Path(sys.argv[1])
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except FileNotFoundError:
+                lines = ["verify log missing"]
+
+            if not lines:
+                lines = ["verify log is empty"]
+
+            for line in lines[-40:]:
+                print(f"::error::{line}")
+            PY
+            exit 1
+          fi
+
+          cat "$verify_log"
+
+      - name: Verify managed NO_PROXY shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify_script="$RUNNER_TEMP/verify-managed-no-proxy.sh"
+          cat >"$verify_script" <<'BASH'
+          set -euo pipefail
+
+          require_eq() {
+            local expected="$1"
+            local actual="$2"
+            local label="$3"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error::$label expected [$expected] but got [$actual]"
+              exit 1
+            fi
+          }
+
+          source "$MANAGED_ENV"
+
+          echo "NO_PROXY after managed env: ${NO_PROXY:-}"
+          echo "no_proxy after managed env: ${no_proxy:-}"
           require_eq "${NO_PROXY:-}" "${no_proxy:-}" "NO_PROXY parity"
           printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx 'localhost' >/dev/null || { echo "::error::NO_PROXY missing localhost"; exit 1; }
           printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1' >/dev/null || { echo "::error::NO_PROXY missing 127.0.0.1"; exit 1; }
@@ -451,17 +547,13 @@ jobs:
             echo "::error::NO_PROXY still contains legacy host:port 3.27.43.117:10086"
             exit 1
           fi
-          echo "Managed shell verification passed."
+          echo "Managed NO_PROXY shell verification passed."
           BASH
 
-          verify_log="$RUNNER_TEMP/verify-managed-shell.log"
-          if ! NODE24_PREFIX="$node24_prefix" \
-               EXPECTED_CODEX_HOME="$codex_home" \
-               CONFIG_PATH="$config_path" \
-               AUTH_PATH="$auth_path" \
-               MANAGED_ENV="$managed_env" \
+          verify_log="$RUNNER_TEMP/verify-managed-no-proxy.log"
+          if ! MANAGED_ENV="$RUNNER_TEMP/codex-managed-env.sh" \
                bash --noprofile --norc "$verify_script" >"$verify_log" 2>&1; then
-            echo "::group::verify-managed-shell.log"
+            echo "::group::verify-managed-no-proxy.log"
             cat "$verify_log" || true
             echo "::endgroup::"
             python3 - "$verify_log" <<'PY'

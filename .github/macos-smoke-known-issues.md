@@ -177,6 +177,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   verify failure now replays the last lines of `verify-managed-shell.log` through a small Python emitter so each line is written back as an explicit `::error::...` annotation.
 
+### 21. When GitHub still collapses a large verify step, split the assertions into separate steps
+
+- Observed on 2026-06-01 after run `26731887981` still reduced the failure to a generic exit annotation.
+- Rationale:
+  once artifact creation, config writing, and NO_PROXY application all pass, a single large `Verify ...` step is the remaining low-observability surface.
+- Current mitigation in the smoke branch:
+  the verification path is now split into separate steps for CRS artifacts, managed node/codex shell state, and managed NO_PROXY shell state so the failing surface is naturally exposed even when log annotations are poor.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
