@@ -237,6 +237,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          require_eq() {
+            local expected="$1"
+            local actual="$2"
+            local label="$3"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error::$label expected [$expected] but got [$actual]"
+              exit 1
+            fi
+          }
+
+          require_file_contains() {
+            local pattern="$1"
+            local file="$2"
+            local label="$3"
+            if ! grep -F "$pattern" "$file"; then
+              echo "::error::$label missing pattern [$pattern] in $file"
+              exit 1
+            fi
+          }
+
           source ~/.zprofile 2>/dev/null || true
           source ~/.zshrc 2>/dev/null || true
           source ~/.bash_profile 2>/dev/null || true
@@ -250,18 +270,18 @@ jobs:
           which node
           which npm
           which codex
-          test "$(which node)" = "$node24_prefix/bin/node"
-          test "$(which npm)" = "$node24_prefix/bin/npm"
-          test "$(which codex)" = "$node24_prefix/bin/codex"
+          require_eq "$node24_prefix/bin/node" "$(which node)" "which node"
+          require_eq "$node24_prefix/bin/npm" "$(which npm)" "which npm"
+          require_eq "$node24_prefix/bin/codex" "$(which codex)" "which codex"
           node -p 'process.versions.node.split(".")[0]' | grep -qx '24'
-          test "$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fx "$node24_prefix/bin" | wc -l | tr -d ' ')" = "1"
-          test -f "$config_path"
-          test -f "$auth_path"
-          grep -F 'model_provider = "OpenAI"' "$config_path"
-          grep -F 'disable_response_storage = true' "$config_path"
-          grep -F 'base_url = "http://127.0.0.1:18080/openai"' "$config_path"
-          grep -F 'wire_api = "responses"' "$config_path"
-          grep -F 'requires_openai_auth = true' "$config_path"
+          require_eq "1" "$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fx "$node24_prefix/bin" | wc -l | tr -d ' ')" "node24 PATH entry count"
+          test -f "$config_path" || { echo "::error::missing config file: $config_path"; exit 1; }
+          test -f "$auth_path" || { echo "::error::missing auth file: $auth_path"; exit 1; }
+          require_file_contains 'model_provider = "OpenAI"' "$config_path" "config model_provider"
+          require_file_contains 'disable_response_storage = true' "$config_path" "config disable_response_storage"
+          require_file_contains 'base_url = "http://127.0.0.1:18080/openai"' "$config_path" "config base_url"
+          require_file_contains 'wire_api = "responses"' "$config_path" "config wire_api"
+          require_file_contains 'requires_openai_auth = true' "$config_path" "config requires_openai_auth"
           python3 - "$auth_path" <<'PY'
           import json
           import sys
@@ -271,10 +291,16 @@ jobs:
 
           assert auth["OPENAI_API_KEY"] == "crs2-smoke-token", auth
           PY
-          test "${NO_PROXY:-}" = "${no_proxy:-}"
-          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx 'localhost'
-          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1'
-          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1:18080'
-          ! printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '3.27.43.117'
-          ! printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '3.27.43.117:10086'
+          require_eq "${NO_PROXY:-}" "${no_proxy:-}" "NO_PROXY parity"
+          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx 'localhost' || { echo "::error::NO_PROXY missing localhost"; exit 1; }
+          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1' || { echo "::error::NO_PROXY missing 127.0.0.1"; exit 1; }
+          printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1:18080' || { echo "::error::NO_PROXY missing 127.0.0.1:18080"; exit 1; }
+          if printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '3.27.43.117'; then
+            echo "::error::NO_PROXY still contains legacy host 3.27.43.117"
+            exit 1
+          fi
+          if printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '3.27.43.117:10086'; then
+            echo "::error::NO_PROXY still contains legacy host:port 3.27.43.117:10086"
+            exit 1
+          fi
           echo "NO_PROXY=${NO_PROXY:-}"
