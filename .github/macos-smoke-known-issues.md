@@ -129,6 +129,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Current mitigation in the smoke branch:
   the config step now also writes the resolved `.codex` path into a workspace marker file, and the verify step can recover or rediscover the path before running assertions.
 
+### 15. `set -euo pipefail` in verify can still hide the failing assertion when a raw probe command exits first
+
+- Observed on 2026-06-01 in run `26730817976`.
+- Symptom:
+  after the artifact-path recovery change, both jobs still failed in `Verify commands and CRS 2.0 artifacts`, but the annotations no longer identified which check failed.
+- Current mitigation in the smoke branch:
+  verify now resolves command paths, versions, auth token, and PATH counts into explicit variables first, then validates them with labeled assertions so the next run exposes the concrete failing check.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:

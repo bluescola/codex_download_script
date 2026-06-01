@@ -269,6 +269,15 @@ jobs:
             fi
           }
 
+          require_nonempty() {
+            local actual="$1"
+            local label="$2"
+            if [[ -z "$actual" ]]; then
+              echo "::error::$label is empty"
+              exit 1
+            fi
+          }
+
           require_file_contains() {
             local pattern="$1"
             local file="$2"
@@ -317,18 +326,29 @@ jobs:
           fi
           config_path="$codex_home/config.toml"
           auth_path="$codex_home/auth.json"
+          node_path="$(command -v node || true)"
+          npm_path="$(command -v npm || true)"
+          codex_path="$(command -v codex || true)"
+          require_nonempty "$node_path" "command -v node"
+          require_nonempty "$npm_path" "command -v npm"
+          require_nonempty "$codex_path" "command -v codex"
           echo "Resolved CODEX_HOME=${codex_home}"
-          node -v
-          npm -v
-          codex --version
-          which node
-          which npm
-          which codex
-          require_eq "$node24_prefix/bin/node" "$(which node)" "which node"
-          require_eq "$node24_prefix/bin/npm" "$(which npm)" "which npm"
-          require_eq "$node24_prefix/bin/codex" "$(which codex)" "which codex"
-          node -p 'process.versions.node.split(".")[0]' | grep -qx '24'
-          require_eq "1" "$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fx "$node24_prefix/bin" | wc -l | tr -d ' ')" "node24 PATH entry count"
+          node_version="$(node -v 2>&1)" || { echo "::error::node -v failed"; exit 1; }
+          npm_version="$(npm -v 2>&1)" || { echo "::error::npm -v failed"; exit 1; }
+          codex_version="$(codex --version 2>&1)" || { echo "::error::codex --version failed"; exit 1; }
+          echo "$node_version"
+          echo "$npm_version"
+          echo "$codex_version"
+          echo "$node_path"
+          echo "$npm_path"
+          echo "$codex_path"
+          require_eq "$node24_prefix/bin/node" "$node_path" "which node"
+          require_eq "$node24_prefix/bin/npm" "$npm_path" "which npm"
+          require_eq "$node24_prefix/bin/codex" "$codex_path" "which codex"
+          node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
+          require_eq "24" "$node_major" "node major version"
+          node24_path_count="$(printf '%s' "$PATH" | tr ':' '\n' | awk -v target="$node24_prefix/bin" '$0 == target { count++ } END { print count + 0 }')"
+          require_eq "1" "$node24_path_count" "node24 PATH entry count"
           test -f "$config_path" || { echo "::error::missing config file: $config_path"; exit 1; }
           test -f "$auth_path" || { echo "::error::missing auth file: $auth_path"; exit 1; }
           require_file_contains 'model_provider = "OpenAI"' "$config_path" "config model_provider"
@@ -336,15 +356,18 @@ jobs:
           require_file_contains 'base_url = "http://127.0.0.1:18080/openai"' "$config_path" "config base_url"
           require_file_contains 'wire_api = "responses"' "$config_path" "config wire_api"
           require_file_contains 'requires_openai_auth = true' "$config_path" "config requires_openai_auth"
-          python3 - "$auth_path" <<'PY'
+          auth_token="$(
+            python3 - "$auth_path" <<'PY'
           import json
           import sys
 
           with open(sys.argv[1], "r", encoding="utf-8") as fh:
               auth = json.load(fh)
 
-          assert auth["OPENAI_API_KEY"] == "crs2-smoke-token", auth
+          print(auth.get("OPENAI_API_KEY", ""))
           PY
+          )"
+          require_eq "crs2-smoke-token" "$auth_token" "auth OPENAI_API_KEY"
           require_eq "${NO_PROXY:-}" "${no_proxy:-}" "NO_PROXY parity"
           printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx 'localhost' || { echo "::error::NO_PROXY missing localhost"; exit 1; }
           printf '%s' "${NO_PROXY:-}" | tr ',' '\n' | grep -Fx '127.0.0.1' || { echo "::error::NO_PROXY missing 127.0.0.1"; exit 1; }
