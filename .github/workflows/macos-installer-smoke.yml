@@ -382,13 +382,8 @@ jobs:
           cat "$managed_env"
           echo "::endgroup::"
 
-          verify_log="$RUNNER_TEMP/verify-managed-shell.log"
-          if ! NODE24_PREFIX="$node24_prefix" \
-               EXPECTED_CODEX_HOME="$codex_home" \
-               CONFIG_PATH="$config_path" \
-               AUTH_PATH="$auth_path" \
-               MANAGED_ENV="$managed_env" \
-               bash --noprofile --norc >"$verify_log" 2>&1 <<'BASH'
+          verify_script="$RUNNER_TEMP/verify-managed-shell.sh"
+          cat >"$verify_script" <<'BASH'
           set -euo pipefail
 
           require_eq() {
@@ -458,7 +453,14 @@ jobs:
           fi
           echo "Managed shell verification passed."
           BASH
-          then
+
+          verify_log="$RUNNER_TEMP/verify-managed-shell.log"
+          if ! NODE24_PREFIX="$node24_prefix" \
+               EXPECTED_CODEX_HOME="$codex_home" \
+               CONFIG_PATH="$config_path" \
+               AUTH_PATH="$auth_path" \
+               MANAGED_ENV="$managed_env" \
+               bash --noprofile --norc "$verify_script" >"$verify_log" 2>&1; then
             echo "::group::verify-managed-shell.log"
             cat "$verify_log" || true
             echo "::endgroup::"

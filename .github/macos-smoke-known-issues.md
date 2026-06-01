@@ -161,6 +161,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Fix:
   keep the nested heredoc terminator aligned with the surrounding script indentation expected by the workflow block so the YAML/run-script boundary remains valid.
 
+### 19. Combining `if ! ... <<'HEREDOC'` with a long embedded shell body is brittle to debug and easy to misclose
+
+- Observed on 2026-06-01 while extracting the verify step locally for syntax checking.
+- Symptom:
+  the verify block could reach `unexpected end of file` at shell-parse time even when the surrounding workflow YAML was accepted.
+- Current mitigation in the smoke branch:
+  the managed-shell verification body is now written to a temporary script file and executed explicitly, instead of being embedded directly as a command heredoc inside the `if ! ...` statement.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
