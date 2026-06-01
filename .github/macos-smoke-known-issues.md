@@ -226,3 +226,11 @@ The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `
   the step body itself was valid, but the failure branch used an indented `python3 - "$verify_log" <<'PY'` block. Bash does not accept an indented heredoc terminator, so the log-replay path masked the real smoke failure with a shell parse error.
 - Current mitigation in the smoke branch:
   failure-log replay now uses plain shell (`tail | sed 's/^/::error::/'`) instead of nested Python heredocs inside workflow `run: |` blocks.
+
+### 26. Logging helpers used under `set -e` should return success explicitly on older macOS bash
+
+- Observed on 2026-06-01 after run `26732963456` failed in `Apply CRS 2.0 config only` immediately after writing `auth.json`.
+- Symptom:
+  the visible tail log stopped at `log_ok "Auth file updated for CRS 2.0 / OpenAI-compatible mode"`, and the final traced command was `[[ 0 -ne 1 ]]` from `codex_log_emit()`. On the GitHub macOS runner bash, the logging helper needed an explicit success return so a false condition inside its optional file-log branch did not surface as the function status under `set -e`.
+- Current mitigation in the smoke branch:
+  `codex_log_emit()` now uses split `[[ ... ]] && [[ ... ]]` conditions and ends with `return 0`, so normal console logging cannot abort the installer.
