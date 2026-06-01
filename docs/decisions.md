@@ -27,22 +27,23 @@
 - 废弃长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 到 shell rc 的方案。
 - 废弃旧版 `# >>> codex user paths >>>` PATH 注入块；当前脚本会清理。
 
-## macOS：使用 Homebrew node@24
+## macOS：复用可用 Node/npm，缺失时使用 Homebrew
 
-决策：macOS 安装脚本使用 Homebrew `node@24` 作为目标 Node.js/npm 来源，Codex 只允许安装在 `brew --prefix node@24` 下的 npm prefix。
+决策：macOS 安装脚本优先复用当前用户已有且可用的 Node.js/npm；缺失或显式强制重装时，再用 Homebrew 作为 Node.js/npm 来源。Codex 安装到用户 npm prefix（如 `~/.local`，非 ASCII HOME/TMPDIR 时使用 ASCII-safe prefix），不要求落在 Homebrew `node@24` prefix 下，后续更新不需要 `sudo`。
 
 原因：
 
-- macOS 默认 shell、Homebrew 路径和 Apple Silicon/Intel 前缀差异可由 `brew --prefix node@24` 统一解析。
-- `node@24` 是明确的 LTS 线，避免 `node` formula 随上游主线变化带来的行为漂移。
-- Homebrew 是 macOS 用户普遍接受的用户级工具链，适合安装 npm 全局包。
-- 脚本可以检查 npm prefix 是否位于 `node@24` 前缀下，并在 prefix 不可写时明确失败。
-- 因为 `node@24` 是 keg-only，脚本只持久化一个专用 PATH 块，把 `node@24/bin` 去重后置顶，不恢复旧版 npm prefix 环境变量方案。
+- 许多 macOS 用户已经通过 Homebrew、nvm、fnm、Volta 或官网安装包拥有可用 Node/npm，重复安装或强制切换会破坏既有工具链预期。
+- Homebrew 仍是缺失 Node/npm 时的统一兜底来源，可覆盖 Apple Silicon/Intel 路径差异。
+- Codex 放在用户 npm prefix 下可避免系统目录权限和 Homebrew Cellar 权限问题，更新 `@openai/codex` 不需要 `sudo`。
+- 非 ASCII HOME/TMPDIR 场景下，用户 npm prefix 可以切到 ASCII-safe 根目录，降低 Node/npm/Codex 路径兼容风险。
+- 脚本应检查最终 prefix 是用户可写、非系统级安装目标；PATH 持久化用户 npm bin，只有脚本本次通过 Homebrew 安装 Node.js 时才补充对应 Node bin。
 
 废弃方案：
 
-- 废弃使用系统自带 Node.js 或随机 PATH 中 Node.js 作为最终安装目标。
-- 废弃通过 nvm 管理 macOS 主流程；macOS 统一交给 Homebrew。
+- 废弃强制安装或激活 Homebrew `node@24` 作为唯一 Node/npm 来源。
+- 废弃要求 Codex 必须安装在 `brew --prefix node@24` 下。
+- 废弃为了安装 Codex 强行覆盖用户已有 Node 管理器或可用 PATH 中的 Node/npm。
 - 废弃 `sudo npm install -g @openai/codex`。
 - 废弃长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 到 zsh/bash profile。
 
@@ -76,13 +77,29 @@ npm install -g --prefix <CodexNpmPrefix> --cache <CodexNpmCache> @openai/codex
 
 - 长期环境变量会影响用户后续所有 npm 命令，导致其他 Node.js 项目安装位置异常。
 - 多个 Node 管理器并存时，长期 prefix 会覆盖工具自己的 prefix 解析。
-- 删除长期变量后，Linux/macOS 由 nvm/Homebrew 决定 prefix，Windows 由显式 `--prefix` 决定本次安装目标。
+- 删除长期变量后，Linux 由 nvm 决定 prefix，macOS 使用用户 npm prefix，Windows 由显式 `--prefix` 决定本次安装目标。
 
 维护要求：
 
 - 新增 npm 调用时优先使用显式参数或当前 Node 管理器默认 prefix。
 - 如果发现旧版 profile 中存在 `NPM_CONFIG_PREFIX` 或 `NPM_CONFIG_CACHE`，应继续清理。
-- 不要把 npm 配置写入 `.npmrc` 作为安装脚本的持久副作用。
+- macOS 允许通过用户级 npm 配置持久化 `prefix`，以保证后续 `npm update -g @openai/codex` 继续落在用户 prefix；不要把 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 写入 shell profile。
+
+## NO_PROXY 合并语义
+
+决策：NO_PROXY/no_proxy 配置应保留用户已有条目，移除旧版固定 IP `3.27.43.117`、`3.27.43.117:10086`，并追加 `localhost`、`127.0.0.1` 和 CRS base_url 解析出的 host、host:port。
+
+原因：
+
+- 用户可能已有公司代理、内网域名或本地开发地址，安装脚本不应覆盖。
+- 旧固定 IP 是历史安装器遗留值，继续保留会误导排查并可能绕过不相关地址。
+- 同时加入 CRS host 和 host:port 可以覆盖不同代理实现对 NO_PROXY 端口匹配的差异。
+
+维护要求：
+
+- 三平台 NO_PROXY 脚本都应保持幂等，重复运行不得产生重复项。
+- 新增 CRS 地址解析逻辑时必须继续保留既有用户项并清理旧固定 IP。
+- 不要把 NO_PROXY 语义改成“整段覆盖为脚本内置默认值”。
 
 ## 统一 preflight
 
@@ -120,7 +137,7 @@ npm install -g --prefix <CodexNpmPrefix> --cache <CodexNpmCache> @openai/codex
 
 - 不打印 `CRS_OAI_KEY`、完整 token 或其他敏感值。
 - 对可恢复问题使用 WARN，不要误用 ERROR。
-- 对会改变系统状态的步骤，日志要包含目标路径或作用域，例如 User scope、nvm prefix、Homebrew node@24 prefix。
+- 对会改变系统状态的步骤，日志要包含目标路径或作用域，例如 User scope、nvm prefix、macOS 用户 npm prefix。
 
 ## dry-run
 

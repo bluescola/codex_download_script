@@ -11,12 +11,13 @@ bash install-codex-cli-mac.sh
 ## 行为摘要
 
 - 开头打印 preflight 环境摘要，便于排查 Node/npm/Codex、Homebrew、路径和代理问题。
-- 使用 Homebrew `node@24` 作为明确 LTS 目标，并把 Codex 安装到 `node@24` npm prefix。
-- 将 `node@24/bin` 以去重方式放到 zsh/bash profile 的 PATH 前面，避免 keg-only `node@24` 被其它 Homebrew Node 覆盖。
+- 优先复用当前用户已有且可用的 Node.js/npm；缺失时才通过 Homebrew 安装或复用 Node.js/npm。
+- 将 Codex 安装到用户 npm prefix（如 `~/.local`，非 ASCII HOME/TMPDIR 时使用 ASCII-safe prefix），后续更新不需要 `sudo`。
+- 持久化用户 npm prefix 与必要 PATH；只有脚本本次通过 Homebrew 安装 Node.js 时，才把对应 Node bin 写入 PATH 块。
 - 清理旧安装器写入的 npm prefix/cache 配置和默认 `CODEX_HOME` profile 导出。
 - 不长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`。
 - 写入 CRS 配置和 `auth.json`；写入失败时保留本次备份，成功后清理本次备份。
-- 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy，并覆盖终端和 GUI 会话。
+- 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy：保留用户已有条目，移除旧固定 IP `3.27.43.117`、`3.27.43.117:10086`，追加 `localhost`、`127.0.0.1` 和 CRS host/host:port，并覆盖终端和 GUI 会话。
 - HOME/TMPDIR 含非 ASCII 时使用 ASCII-safe 根目录。
 
 ## 常用参数

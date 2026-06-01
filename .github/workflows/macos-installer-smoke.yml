@@ -52,16 +52,16 @@ jobs:
           source ~/.bashrc 2>/dev/null || true
           source ~/.bash_profile 2>/dev/null || true
           source ~/.bashrc 2>/dev/null || true
-          node24_prefix="$(brew --prefix node@24)"
+          user_prefix="$HOME/.local"
+          user_bin="$user_prefix/bin"
           node -v
           npm -v
           codex --version
           which node
           which npm
           which codex
-          test "$(which node)" = "$node24_prefix/bin/node"
-          test "$(which npm)" = "$node24_prefix/bin/npm"
-          test "$(which codex)" = "$node24_prefix/bin/codex"
-          node -p 'process.versions.node.split(".")[0]' | grep -qx '24'
-          test "$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fx "$node24_prefix/bin" | wc -l | tr -d ' ')" = "1"
+          test "$(npm config get prefix)" = "$user_prefix"
+          test "$(which codex)" = "$user_bin/codex"
+          node -p 'Number(process.versions.node.split(".")[0]) >= 20' | grep -qx 'true'
+          test "$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fx "$user_bin" | wc -l | tr -d ' ')" = "1"
           echo "NO_PROXY=${NO_PROXY:-}"

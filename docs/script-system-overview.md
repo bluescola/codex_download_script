@@ -17,7 +17,7 @@
 | 平台 | 用户入口 | 实际主脚本 | 说明 |
 | --- | --- | --- | --- |
 | Linux | `install-codex-cli-linux.sh` | 同文件 | 安装 nvm LTS、Codex、CRS、NO_PROXY。`run-install.cmd` 只是在 Windows 中提示复制到 Linux/WSL 后运行。 |
-| macOS | `install-codex-cli-mac.sh` | 同文件 | 安装或复用 Homebrew `node@24`，安装 Codex、CRS、NO_PROXY。 |
+| macOS | `install-codex-cli-mac.sh` | 同文件 | 优先复用可用 Node/npm；缺失时通过 Homebrew 提供 Node/npm；安装 Codex、CRS、NO_PROXY。 |
 | Windows | `install-codex-cli.cmd` | `install-codex-cli-and-setup-no-proxy.ps1` -> `install-codex-cli.ps1` + `setup_no_proxy_windows.ps1` | `.cmd` 负责用 `-ExecutionPolicy Bypass` 启动组合安装流程。 |
 | Windows 修复 | `check-and-repair-codex-env.cmd` | `check-and-repair-codex-env.ps1` | 安装后 PATH、执行策略、`codex.cmd`、PowerShell shim 等问题优先看这里。 |
 | VC++ 运行库 | `install-vc-redist-x64.cmd` | `install-vc-redist-x64.ps1` | Windows Codex 原生二进制缺 DLL 时使用。 |
@@ -49,13 +49,13 @@
 2. 加载日志模块，打印 preflight 环境摘要；`--dry-run` 到这里结束。
 3. 检查 HOME/TMPDIR 是否含非 ASCII，必要时使用 `/Users/Shared/Codex-<uid>`。
 4. 检查已有 Node/npm/Codex，决定是否为旧 CRS 配置创建临时备份。
-5. 安装或复用 Homebrew，安装 `node@24`。
+5. 优先复用已有且可用的 Node.js/npm；缺失或显式强制时，通过 Homebrew 安装或复用 Node.js/npm。
 6. 检查系统级 Codex：默认告警；传入 `--remove-system-codex` 才移除。
 7. 清理旧安装器 npm 配置；`CODEX_HOME` profile 环境变量只在非默认目录时持久化。
-8. 把 Codex 安装到 Homebrew `node@24` npm prefix。
-9. 清理旧 PATH 块、旧 `NPM_CONFIG_*` 和默认 `CODEX_HOME`，并把 `node@24/bin` 去重置顶写入 zsh/bash profile。
+8. 把 Codex 安装到用户 npm prefix（如 `~/.local`，非 ASCII 场景使用 ASCII-safe prefix），后续更新无需 `sudo`。
+9. 清理旧 PATH 块、旧 `NPM_CONFIG_*` 和默认 `CODEX_HOME`；持久化用户 npm prefix 与必要 PATH（用户 npm bin，本次通过 Homebrew 安装 Node 时包含 Homebrew Node bin）。
 10. 写入 CRS 配置和 `auth.json`。
-11. 调用 `setup_no_proxy_mac.sh` 写入 shell profile 和 LaunchAgent。
+11. 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy，并写入 shell profile 和 LaunchAgent。
 
 ### Windows
 
@@ -91,10 +91,10 @@
 
 三平台 NO_PROXY 脚本都应保持幂等：
 
-- 读取 CRS `base_url`，加入 host 和 host:port。
-- 固定加入 `localhost`、`127.0.0.1`。
+- 保留用户已有 NO_PROXY/no_proxy 条目。
 - 移除旧版固定 IP：`3.27.43.117`、`3.27.43.117:10086`。
-- 保留用户已有 NO_PROXY 项。
+- 固定加入 `localhost`、`127.0.0.1`。
+- 读取 CRS `base_url`，追加 CRS host 和 host:port。
 
 平台差异：
 
@@ -116,7 +116,7 @@
 - 不要把 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 长期写入用户环境；Windows 还要继续清理旧版本曾写入的 `NPM_CONFIG_USERCONFIG`。
 - Windows npm 安装必须继续显式传 `--prefix` 和 `--cache`。
 - Linux Codex 安装目标必须继续在 nvm prefix 下。
-- macOS Codex 安装目标必须继续在 Homebrew `node@24` prefix 下。
+- macOS Codex 安装目标必须继续在用户 npm prefix 下；Homebrew 只在 Node/npm 缺失时作为 Node 来源，不作为强制 Codex prefix。
 - 系统级 Codex 默认只告警；删除必须由显式参数触发。
 - 包内 README 不属于维护文档任务范围。
 
@@ -125,7 +125,7 @@
 | 问题 | 优先查看 |
 | --- | --- |
 | Linux 安装失败 | `Codex-Linux-一键安装包/install-codex-cli-linux.sh` 的 `ensure_node_npm`、`ensure_codex`、`resolve_crs_base_url` |
-| macOS 安装失败 | `Codex-Mac-一键安装包/install-codex-cli-mac.sh` 的 `ensure_node_npm`、`ensure_homebrew_node_active`、`ensure_codex` |
+| macOS 安装失败 | `Codex-Mac-一键安装包/install-codex-cli-mac.sh` 的 `ensure_node_npm`、用户 npm prefix 解析和 `ensure_codex` |
 | Windows 安装失败 | `Codex-windows一键安装包/install-codex-cli.ps1` 的 `Initialize-CodexPathSettings`、`Ensure-Node`、`Ensure-Codex` |
 | Windows 安装后 `codex` 不可用 | `Codex-windows一键安装包/check-and-repair-codex-env.ps1` |
 | 独立 Node/npm 安装或卸载 | `Node和npm安装和卸载脚本/`，流程见 `docs/graphs/node-npm.drawio` |

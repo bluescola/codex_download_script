@@ -12,16 +12,20 @@
 
 > 如果你已经能在终端运行 `codex --version`，可直接跳到“前置准备”。
 
-### 步骤 0: 安装 Node.js（含 npm）
+### 步骤 0: 准备 Node.js（含 npm）
 
-请先安装 **Node.js 24 LTS**。
+请先检查当前终端是否已有可用的 Node.js/npm。可用时直接复用，不需要为了 Codex 强制切换到 Homebrew Node。
 
-方式 1（推荐）：Homebrew 安装 LTS 版本
+```bash
+node -v
+npm -v
+```
+
+如果 `node` 或 `npm` 不存在，再用 Homebrew 安装 Node.js/npm：
 
 ```bash
 brew --version
-brew install node@24
-export PATH="$(brew --prefix node@24)/bin:$PATH"
+brew install node
 node -v
 npm -v
 ```
@@ -39,9 +43,7 @@ xcode-select --install
 brew --version
 ```
 
-方式 2：从 Node.js 官网下载并安装 LTS（图形化安装）
-
-安装完成后同样验证：
+也可以从 Node.js 官网下载 LTS 版本图形化安装包。安装完成后同样验证：
 
 ```bash
 node -v
@@ -50,12 +52,29 @@ npm -v
 
 ### 步骤 1: 安装 Codex CLI
 
+不要使用 `sudo npm i -g`。建议安装到当前用户 npm prefix，例如 `~/.local`；如果 HOME/TMPDIR 含中文或其他非 ASCII 字符，可改用 ASCII-safe prefix，例如 `/Users/Shared/Codex-$(id -u)/npm`。
+
 ```bash
-npm i -g @openai/codex
+CODEX_NPM_PREFIX="$HOME/.local"
+mkdir -p "$CODEX_NPM_PREFIX"
+npm config set prefix "$CODEX_NPM_PREFIX"
+npm i -g --prefix "$CODEX_NPM_PREFIX" @openai/codex
+export PATH="$CODEX_NPM_PREFIX/bin:$PATH"
 codex --version
 ```
 
-> 若提示 `codex: command not found`，请重开终端，或确认 npm 全局 bin 已加入 `PATH`。
+后续更新使用同一个 prefix，不需要 `sudo`：
+
+```bash
+CODEX_NPM_PREFIX="$HOME/.local"
+npm update -g @openai/codex
+```
+
+若提示 `codex: command not found`，请重开终端，或确认用户 npm bin（如 `~/.local/bin`）已加入 `PATH`。只需要持久化 PATH 和用户级 npm `prefix`，不要把 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 写入 `~/.zshrc`、`~/.zprofile` 或 `~/.bash_profile`。
+
+### NO_PROXY/no_proxy 说明
+
+一键安装包配置 NO_PROXY/no_proxy 时会保留用户已有条目，移除旧固定 IP `3.27.43.117`、`3.27.43.117:10086`，并追加 `localhost`、`127.0.0.1` 和 CRS host/host:port。
 
 ---
 
