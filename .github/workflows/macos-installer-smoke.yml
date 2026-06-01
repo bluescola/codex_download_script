@@ -124,7 +124,19 @@ jobs:
           done
           test "$status" = "200"
 
-          bash install-codex-cli-mac.sh --verbose --skip-crs-config --skip-no-proxy
+          install_log="$RUNNER_TEMP/install-crs-smoke.log"
+          if ! bash install-codex-cli-mac.sh --verbose --skip-crs-config --skip-no-proxy >"$install_log" 2>&1; then
+            echo "::group::install-crs-smoke.log"
+            cat "$install_log" || true
+            echo "::endgroup::"
+            if [[ -f "$install_log" ]]; then
+              tail -n 60 "$install_log" | sed 's/^/::error::/' || true
+            else
+              echo "::error::install log missing: $install_log"
+            fi
+            exit 1
+          fi
+          cat "$install_log"
 
       - name: Apply CRS 2.0 config only
         shell: bash

@@ -262,3 +262,11 @@ The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `
   true empty arrays instead of sentinel empty-string elements where safe,
   explicit non-empty guards before array-based helper calls,
   and `python3 -c` instead of nested inline Python heredocs in workflow bodies.
+
+### 30. Once the failure surface moves, the corresponding workflow step also needs explicit log capture
+
+- Observed on 2026-06-01 after run `26733744869` moved the remaining failure from `Apply CRS 2.0 config only` back to `Install with mocked CRS 2.0 endpoint`.
+- Rationale:
+  after a batch shell-compatibility cleanup, the failing layer can move earlier in the workflow, but GitHub may still collapse that step to a generic `Process completed with exit code 1.` without surfacing the installer's real stderr.
+- Current mitigation in the smoke branch:
+  `Install with mocked CRS 2.0 endpoint` now captures installer output to its own log file and replays the last lines into Actions annotations on failure.
