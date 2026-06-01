@@ -18,9 +18,11 @@ codex_log_emit() {
   local level="$1"
   shift
   printf '[%s] %s\n' "$level" "$*"
-  if [[ "${DRY_RUN:-0}" -ne 1 ]] && [[ -n "${CODEX_INSTALL_LOG_FILE:-}" ]]; then
-    mkdir -p "$(dirname "$CODEX_INSTALL_LOG_FILE")" 2>/dev/null || true
-    printf '%s [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$*" >> "$CODEX_INSTALL_LOG_FILE" 2>/dev/null || true
+  if [[ "${DRY_RUN:-0}" -ne 1 ]]; then
+    if [[ -n "${CODEX_INSTALL_LOG_FILE:-}" ]]; then
+      mkdir -p "$(dirname "$CODEX_INSTALL_LOG_FILE")" 2>/dev/null || true
+      printf '%s [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$*" >> "$CODEX_INSTALL_LOG_FILE" 2>/dev/null || true
+    fi
   fi
   return 0
 }

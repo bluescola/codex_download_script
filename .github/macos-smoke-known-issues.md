@@ -231,6 +231,6 @@ The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `
 
 - Observed on 2026-06-01 after run `26732963456` failed in `Apply CRS 2.0 config only` immediately after writing `auth.json`.
 - Symptom:
-  the visible tail log stopped at `log_ok "Auth file updated for CRS 2.0 / OpenAI-compatible mode"`, and the final traced command was `[[ 0 -ne 1 ]]` from `codex_log_emit()`. On the GitHub macOS runner bash, the logging helper needed an explicit success return so a false condition inside its optional file-log branch did not surface as the function status under `set -e`.
+  the visible tail log stopped at `log_ok "Auth file updated for CRS 2.0 / OpenAI-compatible mode"`, and the final traced commands were the `[[ ... ]]` tests inside `codex_log_emit()`. On the GitHub macOS runner bash, `set -e` was still sensitive to a false last condition inside `if cond1 && cond2; then ... fi`, even though the branch was intentionally skipped.
 - Current mitigation in the smoke branch:
-  `codex_log_emit()` now uses split `[[ ... ]] && [[ ... ]]` conditions and ends with `return 0`, so normal console logging cannot abort the installer.
+  `codex_log_emit()` now uses nested `if` blocks instead of `if cond1 && cond2`, and ends with `return 0`, so normal console logging cannot abort the installer.
