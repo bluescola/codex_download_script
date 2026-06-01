@@ -288,18 +288,6 @@ jobs:
             fi
           }
 
-          append_managed_block() {
-            local file="$1"
-            local start="$2"
-            local end="$3"
-            [[ -f "$file" ]] || return 0
-            awk -v start="$start" -v end="$end" '
-              index($0, start) { capture=1; next }
-              index($0, end) { capture=0; next }
-              capture { print }
-            ' "$file" >> "$managed_env"
-          }
-
           node24_prefix="$(brew --prefix node@24)"
           codex_home="${CODEX_SMOKE_HOME:-}"
           if [[ -z "$codex_home" && -f "$GITHUB_WORKSPACE/.codex-smoke-home" ]]; then
@@ -308,17 +296,7 @@ jobs:
           fi
           if [[ -z "$codex_home" ]]; then
             codex_home="$(
-              python3 - <<'PY'
-from pathlib import Path
-
-candidates = [Path.home() / ".codex"]
-candidates.extend(sorted(Path("/Users/Shared").glob("Codex-*/.codex")))
-
-for candidate in candidates:
-    if (candidate / "config.toml").is_file() and (candidate / "auth.json").is_file():
-        print(candidate)
-        break
-              PY
+              python3 -c 'from pathlib import Path; candidates=[Path.home()/".codex", *sorted(Path("/Users/Shared").glob("Codex-*/.codex"))]; print(next((str(candidate) for candidate in candidates if (candidate/"config.toml").is_file() and (candidate/"auth.json").is_file()), ""))'
             )"
             if [[ -n "$codex_home" ]]; then
               echo "Rediscovered CODEX_HOME during verify: $codex_home"
@@ -343,15 +321,7 @@ for candidate in candidates:
           require_file_contains 'wire_api = "responses"' "$config_path" "config wire_api"
           require_file_contains 'requires_openai_auth = true' "$config_path" "config requires_openai_auth"
           auth_token="$(
-            python3 - "$auth_path" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as fh:
-    auth = json.load(fh)
-
-print(auth.get("OPENAI_API_KEY", ""))
-          PY
+            python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("OPENAI_API_KEY", ""))' "$auth_path"
           )"
           require_eq "crs2-smoke-token" "$auth_token" "auth OPENAI_API_KEY"
           printf '%s\n' "$codex_home" > "$RUNNER_TEMP/codex-home-path.txt"

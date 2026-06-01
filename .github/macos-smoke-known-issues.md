@@ -193,6 +193,14 @@ The older reference branch `actions/macos-installer-smoke` was created around th
 - Fix:
   keep the Python body left-aligned inside the heredoc content, even when the surrounding workflow `run: |` block is indented.
 
+### 23. For short workflow helpers, `python3 -c` is safer than nested heredocs
+
+- Observed on 2026-06-01 while iterating on the split verify steps after run `26732400557`.
+- Rationale:
+  once a workflow `run: |` block already contains shell functions and nested script generation, additional inline Python heredocs add another parsing boundary that is easy to destabilize.
+- Current mitigation in the smoke branch:
+  short Python helpers in the verify path now use `python3 -c` instead of nested heredocs.
+
 ## Current Workflow Intent
 
 The workflow should validate these CRS2.0-specific behaviors on `macos-14` and `macos-15`:
