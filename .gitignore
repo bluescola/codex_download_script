@@ -1,3 +1,6 @@
 # Codex CLI local state (config/cache/memories); keep out of git.
 # Matches both directories and accidental files/symlinks created by tooling.
 .codex
+
+# Local fixture used to reproduce Chinese/non-ASCII Windows user path issues.
+模拟中文用户/

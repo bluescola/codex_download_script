@@ -979,6 +979,27 @@ function Ensure-NpmUserPrefix {
     [Environment]::SetEnvironmentVariable('NPM_CONFIG_CACHE', $null, 'User')
     [Environment]::SetEnvironmentVariable('NPM_CONFIG_USERCONFIG', $null, 'User')
 
+    $npmPath = Resolve-NpmCommandPath
+    if ([string]::IsNullOrWhiteSpace($npmPath)) {
+        Write-WarnMsg 'npm was not found; cannot persist npm user prefix for future Codex updates.'
+    }
+    else {
+        & $npmPath config set prefix $target --location user | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to set npm user prefix to Codex install target: $target"
+        }
+
+        $resolvedPrefix = (& $npmPath config get prefix 2>$null)
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($resolvedPrefix)) {
+            $resolvedPrefix = $resolvedPrefix.Trim()
+            if ((Normalize-ComparablePath $resolvedPrefix) -ine (Normalize-ComparablePath $target)) {
+                throw "npm prefix mismatch after configuration. Expected '$target', got '$resolvedPrefix'."
+            }
+        }
+
+        Write-Info "Pinned npm user prefix for future Codex updates: $target"
+    }
+
     Write-Info "Codex npm prefix for this install: $target"
 }
 

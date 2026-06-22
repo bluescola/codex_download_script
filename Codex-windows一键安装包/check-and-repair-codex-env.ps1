@@ -166,16 +166,118 @@ function Try-GetNpmPrefix {
     return $null
 }
 
+function Test-CodexBinDir([string]$Directory) {
+    if ([string]::IsNullOrWhiteSpace($Directory)) {
+        return $false
+    }
+
+    foreach ($leaf in @('codex.cmd', 'codex.ps1', 'codex')) {
+        if (Test-Path (Join-Path $Directory $leaf)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-CommandPathValue([object]$Command) {
+    if ($null -eq $Command) {
+        return $null
+    }
+
+    foreach ($propertyName in @('Path', 'Source')) {
+        $matches = @($Command.PSObject.Properties.Match($propertyName))
+        if ($matches.Count -eq 0) {
+            continue
+        }
+
+        $value = [string]$matches[0].Value
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+
+    return $null
+}
+
+function Test-SystemInstallPath([string]$PathValue) {
+    $normalized = Normalize-Path $PathValue
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return $false
+    }
+
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData, $env:SystemRoot)) {
+        $normalizedRoot = Normalize-Path $root
+        if ([string]::IsNullOrWhiteSpace($normalizedRoot)) {
+            continue
+        }
+
+        if ($normalized -eq $normalizedRoot -or $normalized.StartsWith("$normalizedRoot\")) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Set-NpmUserPrefix([string]$Prefix) {
+    if ([string]::IsNullOrWhiteSpace($Prefix)) {
+        return $false
+    }
+
+    if (Test-SystemInstallPath $Prefix) {
+        Write-WarnMsg "Refusing to set npm user prefix to a system-level directory: $Prefix"
+        return $false
+    }
+
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npmCmd) {
+        Write-WarnMsg 'npm was not found; cannot repair npm prefix.'
+        return $false
+    }
+
+    Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue
+    Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue
+    [Environment]::SetEnvironmentVariable('NPM_CONFIG_PREFIX', $null, 'User')
+    [Environment]::SetEnvironmentVariable('NPM_CONFIG_USERCONFIG', $null, 'User')
+
+    & npm config set prefix $Prefix --location user | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-WarnMsg "npm config set prefix failed for: $Prefix"
+        return $false
+    }
+
+    $resolved = Try-GetNpmPrefix
+    if ([string]::IsNullOrWhiteSpace($resolved) -or (Normalize-Path $resolved) -ne (Normalize-Path $Prefix)) {
+        Write-WarnMsg "npm prefix still does not match Codex path after repair. Expected '$Prefix', got '$resolved'."
+        return $false
+    }
+
+    return $true
+}
+
 function Resolve-CodexBinDir {
     $candidates = New-Object System.Collections.Generic.List[string]
 
-    if (-not [string]::IsNullOrWhiteSpace($script:CodexAsciiNpmPrefix)) {
-        [void]$candidates.Add($script:CodexAsciiNpmPrefix)
+    # Prefer the command that PowerShell actually resolves from PATH. If npm/nvm
+    # prefix is stale, trusting npm first updates the wrong Codex installation.
+    foreach ($name in @('codex', 'codex.cmd', 'codex.ps1')) {
+        $commands = @(Get-Command $name -All -ErrorAction SilentlyContinue)
+        foreach ($cmd in $commands) {
+            $commandPath = Get-CommandPathValue $cmd
+            if ([string]::IsNullOrWhiteSpace($commandPath)) {
+                continue
+            }
+
+            $dir = Split-Path -Parent $commandPath
+            if (-not [string]::IsNullOrWhiteSpace($dir)) {
+                [void]$candidates.Add($dir)
+            }
+        }
     }
 
-    $npmPrefix = Try-GetNpmPrefix
-    if (-not [string]::IsNullOrWhiteSpace($npmPrefix)) {
-        [void]$candidates.Add($npmPrefix)
+    if (-not [string]::IsNullOrWhiteSpace($script:CodexAsciiNpmPrefix)) {
+        [void]$candidates.Add($script:CodexAsciiNpmPrefix)
     }
 
     if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
@@ -183,16 +285,9 @@ function Resolve-CodexBinDir {
         [void]$candidates.Add($appDataNpm)
     }
 
-    $codexCommands = @(Get-Command codex -All -ErrorAction SilentlyContinue)
-    foreach ($cmd in $codexCommands) {
-        if ([string]::IsNullOrWhiteSpace($cmd.Path)) {
-            continue
-        }
-
-        $dir = Split-Path -Parent $cmd.Path
-        if (-not [string]::IsNullOrWhiteSpace($dir)) {
-            [void]$candidates.Add($dir)
-        }
+    $npmPrefix = Try-GetNpmPrefix
+    if (-not [string]::IsNullOrWhiteSpace($npmPrefix)) {
+        [void]$candidates.Add($npmPrefix)
     }
 
     $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
@@ -207,9 +302,7 @@ function Resolve-CodexBinDir {
         }
         [void]$seen.Add($normalized)
 
-        $codexCmd = Join-Path $candidate 'codex.cmd'
-        $codexPs1 = Join-Path $candidate 'codex.ps1'
-        if ((Test-Path $codexCmd) -or (Test-Path $codexPs1)) {
+        if (Test-CodexBinDir $candidate) {
             return $candidate
         }
     }
@@ -511,6 +604,9 @@ if ($script:UseAsciiSafePaths) {
 Write-Host ''
 Write-Info 'Checking Codex PATH entry...'
 $codexBinDir = Resolve-CodexBinDir
+$npmPrefixBeforeRepair = Try-GetNpmPrefix
+$npmPrefixAfterRepair = $npmPrefixBeforeRepair
+$npmPrefixStatus = 'unknown'
 
 if ([string]::IsNullOrWhiteSpace($codexBinDir)) {
     $codexPathStatus = 'codex_not_installed'
@@ -559,6 +655,36 @@ else {
             $failures.Add($msg)
             Write-Fail $msg
         }
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($codexBinDir)) {
+    if ([string]::IsNullOrWhiteSpace($npmPrefixBeforeRepair)) {
+        $npmPrefixStatus = 'missing'
+        $msg = 'npm prefix could not be resolved; Codex self-update may not target the active Codex installation.'
+        $warnings.Add($msg)
+        Write-WarnMsg $msg
+    }
+    elseif ((Normalize-Path $npmPrefixBeforeRepair) -ne (Normalize-Path $codexBinDir)) {
+        $npmPrefixStatus = 'mismatch'
+        $msg = "npm prefix points to '$npmPrefixBeforeRepair', but active Codex resolves from '$codexBinDir'. This can make updates modify the wrong Codex installation."
+        $warnings.Add($msg)
+        Write-WarnMsg $msg
+
+        if (Set-NpmUserPrefix $codexBinDir) {
+            $npmPrefixAfterRepair = Try-GetNpmPrefix
+            $npmPrefixStatus = 'repaired'
+            Write-Ok "npm user prefix repaired to active Codex path: $codexBinDir"
+        }
+        else {
+            $msg = "Failed to repair npm prefix to active Codex path: $codexBinDir"
+            $failures.Add($msg)
+            Write-Fail $msg
+        }
+    }
+    else {
+        $npmPrefixStatus = 'matched'
+        Write-Ok "npm prefix matches active Codex path: $codexBinDir"
     }
 }
 
@@ -793,6 +919,9 @@ if ($AsJson) {
         timestamp = (Get-Date).ToString('s')
         codex_bin_dir = $codexBinDir
         codex_path_status = $codexPathStatus
+        npm_prefix_before_repair = $npmPrefixBeforeRepair
+        npm_prefix_after_repair = $npmPrefixAfterRepair
+        npm_prefix_status = $npmPrefixStatus
         failures = @($failures)
         warnings = @($warnings)
         exit_code = $exitCode
