@@ -13,6 +13,27 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Test-BoundSwitch {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$BoundParameters,
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    return ($BoundParameters.ContainsKey($Name) -and [bool]$BoundParameters[$Name])
+}
+
+$script:ForceNodeReinstallRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'ForceNodeReinstall'
+$script:ForceCodexReinstallRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'ForceCodexReinstall'
+$script:SkipCrsConfigRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'SkipCrsConfig'
+$script:RemoveSystemCodexRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'RemoveSystemCodex'
+$script:DryRun = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'DryRun'
+$script:VerboseLogRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'VerboseLog'
+$script:TraceLogRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'TraceLog'
+$script:UninstallSystemCodexPrefixRequested = if ($PSBoundParameters.ContainsKey('UninstallSystemCodexPrefix')) { $PSBoundParameters['UninstallSystemCodexPrefix'] } else { $null }
+$script:NpmCommandPathRequested = if ($PSBoundParameters.ContainsKey('NpmCommandPath')) { $PSBoundParameters['NpmCommandPath'] } else { $null }
+
 function Test-ContainsNonAscii([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) {
         return $false
@@ -131,11 +152,10 @@ function Get-CodexNpmCache {
 }
 
 Initialize-CodexPathSettings
-$script:NpmCommandOverride = $NpmCommandPath
-$script:DryRun = [bool]$DryRun
-$script:RequestedLogLevel = if ($TraceLog) {
+$script:NpmCommandOverride = $script:NpmCommandPathRequested
+$script:RequestedLogLevel = if ($script:TraceLogRequested) {
     'trace'
-} elseif ($VerboseLog) {
+} elseif ($script:VerboseLogRequested) {
     'verbose'
 } elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_LOG_LEVEL)) {
     $env:CODEX_INSTALL_LOG_LEVEL
@@ -281,7 +301,7 @@ function Write-PreflightSummary {
     Write-DebugMsg "NPM_CONFIG_CACHE: $(Get-EnvState 'NPM_CONFIG_CACHE')"
     Write-DebugMsg "NPM_CONFIG_USERCONFIG: $(Get-EnvState 'NPM_CONFIG_USERCONFIG')"
     Write-DebugMsg "Proxy env: HTTP_PROXY=$(Get-EnvState 'HTTP_PROXY'), HTTPS_PROXY=$(Get-EnvState 'HTTPS_PROXY'), ALL_PROXY=$(Get-EnvState 'ALL_PROXY'), NO_PROXY=$(Get-EnvState 'NO_PROXY')"
-    Write-DebugMsg "Options: ForceNode=$ForceNodeReinstall ForceCodex=$ForceCodexReinstall RemoveSystem=$RemoveSystemCodex SkipCrs=$SkipCrsConfig DryRun=$script:DryRun LogLevel=$script:CodexLogLevel"
+    Write-DebugMsg "Options: ForceNode=$script:ForceNodeReinstallRequested ForceCodex=$script:ForceCodexReinstallRequested RemoveSystem=$script:RemoveSystemCodexRequested SkipCrs=$script:SkipCrsConfigRequested DryRun=$script:DryRun LogLevel=$script:CodexLogLevel"
     Write-TraceMsg "PATH: $env:Path"
 }
 
@@ -1497,14 +1517,14 @@ function Ensure-Node {
         }
     }
 
-    if ($preexistingNodeReady -and -not $ForceNodeReinstall) {
+    if ($preexistingNodeReady -and -not $script:ForceNodeReinstallRequested) {
         Write-Info 'Node.js and npm already present.'
         Write-Ok ("Node.js: " + (node -v))
         Write-Ok ("npm: " + (npm -v))
         return
     }
 
-    if ($ForceNodeReinstall -and (Test-Path $UserNodeRoot)) {
+    if ($script:ForceNodeReinstallRequested -and (Test-Path $UserNodeRoot)) {
         Write-Info "Force reinstall requested; existing user Node.js install will be replaced atomically: $UserNodeRoot"
     }
 
@@ -1825,7 +1845,7 @@ function Ensure-Codex {
     $userNpmBinDir = Get-CodexNpmPrefix
 
     Write-Info 'Checking for system-level Codex CLI before user install...'
-    if ($RemoveSystemCodex) {
+    if ($script:RemoveSystemCodexRequested) {
         Ensure-NoSystemCodex $userNpmBinDir
     }
     else {
@@ -1834,14 +1854,14 @@ function Ensure-Codex {
     Ensure-NpmUserPrefix
     $npmBinDir = Resolve-NpmGlobalBinDir
 
-    if ($ForceCodexReinstall) {
+    if ($script:ForceCodexReinstallRequested) {
         Write-Info 'Force reinstall requested: uninstalling existing Codex CLI...'
         $npmPrefixForUninstall = Get-CodexNpmPrefix
         npm uninstall -g --prefix $npmPrefixForUninstall '@openai/codex' | Out-Null
     }
 
     $existingCodexVersion = $null
-    if (-not $ForceCodexReinstall) {
+    if (-not $script:ForceCodexReinstallRequested) {
         try {
             $userCodexCmd = Join-Path $npmBinDir 'codex.cmd'
             if (Test-Path $userCodexCmd) {
@@ -1970,22 +1990,22 @@ Write-Info 'Starting install for Codex CLI and dependencies...'
 Write-PreflightSummary
 
 if ($script:DryRun) {
-    if (-not [string]::IsNullOrWhiteSpace($UninstallSystemCodexPrefix)) {
-        Write-Info "Dry run: would uninstall system-level Codex under: $UninstallSystemCodexPrefix"
+    if (-not [string]::IsNullOrWhiteSpace($script:UninstallSystemCodexPrefixRequested)) {
+        Write-Info "Dry run: would uninstall system-level Codex under: $script:UninstallSystemCodexPrefixRequested"
     }
     Write-Ok 'Dry run complete. No files, environment variables, packages, processes, or PATH entries were changed.'
     exit 0
 }
 
-if (-not [string]::IsNullOrWhiteSpace($UninstallSystemCodexPrefix)) {
-    [void](Invoke-NpmUninstallCodexAtPrefix $UninstallSystemCodexPrefix)
-    Remove-KnownSystemCodexFiles $UninstallSystemCodexPrefix
+if (-not [string]::IsNullOrWhiteSpace($script:UninstallSystemCodexPrefixRequested)) {
+    [void](Invoke-NpmUninstallCodexAtPrefix $script:UninstallSystemCodexPrefixRequested)
+    Remove-KnownSystemCodexFiles $script:UninstallSystemCodexPrefixRequested
 
     $remainingSystemCodex = @(Find-SystemCodexInstalls -UserNpmBinDir $null | Where-Object {
-        $_.PrefixDir -ieq (Normalize-ComparablePath $UninstallSystemCodexPrefix)
+        $_.PrefixDir -ieq (Normalize-ComparablePath $script:UninstallSystemCodexPrefixRequested)
     })
     if ($remainingSystemCodex.Count -gt 0) {
-        throw "System-level Codex CLI remains under: $UninstallSystemCodexPrefix"
+        throw "System-level Codex CLI remains under: $script:UninstallSystemCodexPrefixRequested"
     }
 
     exit 0
@@ -2003,7 +2023,7 @@ catch {
 Ensure-Node
 Ensure-Codex
 
-if (-not $SkipCrsConfig) {
+if (-not $script:SkipCrsConfigRequested) {
     Configure-CrsFiles -CleanExistingConfig:$cleanExistingConfig
 }
 

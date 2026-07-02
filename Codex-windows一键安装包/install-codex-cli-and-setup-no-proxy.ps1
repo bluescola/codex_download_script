@@ -10,10 +10,29 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:DryRun = [bool]$DryRun
-$script:RequestedLogLevel = if ($TraceLog) {
+
+function Test-BoundSwitch {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$BoundParameters,
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    return ($BoundParameters.ContainsKey($Name) -and [bool]$BoundParameters[$Name])
+}
+
+$script:ForceNodeReinstallRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'ForceNodeReinstall'
+$script:ForceCodexReinstallRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'ForceCodexReinstall'
+$script:RemoveSystemCodexRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'RemoveSystemCodex'
+$script:SkipCrsConfigRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'SkipCrsConfig'
+$script:DryRun = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'DryRun'
+$script:VerboseLogRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'VerboseLog'
+$script:TraceLogRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'TraceLog'
+
+$script:RequestedLogLevel = if ($script:TraceLogRequested) {
     'trace'
-} elseif ($VerboseLog) {
+} elseif ($script:VerboseLogRequested) {
     'verbose'
 } elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_LOG_LEVEL)) {
     $env:CODEX_INSTALL_LOG_LEVEL
@@ -53,16 +72,18 @@ try {
     Write-Host ''
 
     Write-Info 'Step 1/2: Install Codex CLI and write config files...'
-    & $installScript `
-        -ForceNodeReinstall:$ForceNodeReinstall `
-        -ForceCodexReinstall:$ForceCodexReinstall `
-        -RemoveSystemCodex:$RemoveSystemCodex `
-        -SkipCrsConfig:$SkipCrsConfig `
-        -DryRun:$DryRun `
-        -VerboseLog:$VerboseLog `
-        -TraceLog:$TraceLog
+    $installParams = @{}
+    if ($script:ForceNodeReinstallRequested) { $installParams['ForceNodeReinstall'] = $true }
+    if ($script:ForceCodexReinstallRequested) { $installParams['ForceCodexReinstall'] = $true }
+    if ($script:RemoveSystemCodexRequested) { $installParams['RemoveSystemCodex'] = $true }
+    if ($script:SkipCrsConfigRequested) { $installParams['SkipCrsConfig'] = $true }
+    if ($script:DryRun) { $installParams['DryRun'] = $true }
+    if ($script:VerboseLogRequested) { $installParams['VerboseLog'] = $true }
+    if ($script:TraceLogRequested) { $installParams['TraceLog'] = $true }
 
-    if ($DryRun) {
+    & $installScript @installParams
+
+    if ($script:DryRun) {
         Write-Ok 'Dry run complete. Skipping NO_PROXY setup.'
         exit 0
     }
