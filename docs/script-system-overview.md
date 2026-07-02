@@ -19,6 +19,9 @@
 | Linux | `install-codex-cli-linux.sh` | 同文件 | 安装 nvm LTS、Codex、CRS、NO_PROXY。`run-install.cmd` 只是在 Windows 中提示复制到 Linux/WSL 后运行。 |
 | macOS | `install-codex-cli-mac.sh` | 同文件 | 安装或复用 Homebrew `node@24`，安装 Codex、CRS、NO_PROXY。 |
 | Windows | `install-codex-cli.cmd` | `install-codex-cli-and-setup-no-proxy.ps1` -> `install-codex-cli.ps1` + `setup_no_proxy_windows.ps1` | `.cmd` 负责用 `-ExecutionPolicy Bypass` 启动组合安装流程。 |
+| Linux 卸载 | `uninstall-codex-cli-and-node-npm-linux.sh` | 同文件 | 先卸载 Codex CLI，再按归属判断是否清理 Node.js/npm。 |
+| macOS 卸载 | `uninstall-codex-cli-and-node-npm-mac.sh` | 同文件 | 先卸载 Codex CLI，再按归属判断是否清理 Node.js/npm。 |
+| Windows 卸载 | `uninstall-codex-cli-and-node-npm.cmd` | `uninstall-codex-cli-and-node-npm.ps1` | `.cmd` 负责用 `-ExecutionPolicy Bypass` 启动卸载流程，并在结束时暂停显示退出码。 |
 | Windows 修复 | `check-and-repair-codex-env.cmd` | `check-and-repair-codex-env.ps1` | 安装后 PATH、执行策略、`codex.cmd`、PowerShell shim 等问题优先看这里。 |
 | VC++ 运行库 | `install-vc-redist-x64.cmd` | `install-vc-redist-x64.ps1` | Windows Codex 原生二进制缺 DLL 时使用。 |
 
