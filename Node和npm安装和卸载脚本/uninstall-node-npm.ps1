@@ -37,6 +37,104 @@ function Resolve-NodeInstallDir {
     return $null
 }
 
+function Resolve-UserNpmRoot {
+    if ([string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        return $null
+    }
+
+    return (Join-Path $env:APPDATA 'npm')
+}
+
+function Test-PathUnderRoot {
+    param(
+        [string]$Path,
+        [string]$Root
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) {
+        return $false
+    }
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+        $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\')
+        return ($fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.StartsWith($fullRoot + '\', [System.StringComparison]::OrdinalIgnoreCase))
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-NodeBlockingProcesses {
+    $roots = @(
+        $UserNodeRoot,
+        (Resolve-NodeInstallDir),
+        "$env:ProgramFiles\nodejs",
+        (Resolve-UserNpmRoot)
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    $processNames = @('node.exe', 'npm.exe', 'npx.exe', 'codex.exe')
+    $currentPid = [int]$PID
+    $matches = @()
+
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    }
+    catch {
+        Write-WarnMsg "Could not inspect running processes: $($_.Exception.Message)"
+        return @()
+    }
+
+    foreach ($process in $processes) {
+        if (-not $process -or [int]$process.ProcessId -eq $currentPid) {
+            continue
+        }
+
+        if ($processNames -notcontains $process.Name) {
+            continue
+        }
+
+        foreach ($root in $roots) {
+            if (Test-PathUnderRoot -Path $process.ExecutablePath -Root $root) {
+                $matches += $process
+                break
+            }
+        }
+    }
+
+    return $matches
+}
+
+function Stop-NodeBlockingProcesses {
+    $processes = @(Get-NodeBlockingProcesses)
+    if ($processes.Count -eq 0) {
+        return
+    }
+
+    Write-WarnMsg 'Detected running Node/npm/Codex processes that may lock uninstall files. They will be stopped first.'
+    foreach ($process in $processes) {
+        $path = if ([string]::IsNullOrWhiteSpace($process.ExecutablePath)) { '(path unavailable)' } else { $process.ExecutablePath }
+        Write-WarnMsg "Stopping PID $($process.ProcessId) $($process.Name): $path"
+        try {
+            Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction Stop
+        }
+        catch {
+            Write-WarnMsg "Failed to stop PID $($process.ProcessId): $($_.Exception.Message)"
+        }
+    }
+
+    Start-Sleep -Milliseconds 800
+
+    $remaining = @(Get-NodeBlockingProcesses)
+    if ($remaining.Count -gt 0) {
+        foreach ($process in $remaining) {
+            Write-WarnMsg "Still running PID $($process.ProcessId) $($process.Name): $($process.ExecutablePath)"
+        }
+        throw 'Some Node/npm/Codex processes are still running. Close Codex, terminals, VS Code, and retry as Administrator if needed.'
+    }
+}
+
 function Uninstall-NodeUser {
     if ([string]::IsNullOrWhiteSpace($UserNodeRoot)) {
         return $false
@@ -47,7 +145,15 @@ function Uninstall-NodeUser {
     }
 
     Write-Info "Removing user Node.js install: $UserNodeRoot"
-    Remove-Item -LiteralPath $UserNodeRoot -Recurse -Force
+    Stop-NodeBlockingProcesses
+    try {
+        Remove-Item -LiteralPath $UserNodeRoot -Recurse -Force -ErrorAction Stop
+    }
+    catch {
+        Write-WarnMsg "Failed to remove user Node.js install: $($_.Exception.Message)"
+        Write-WarnMsg 'If access is denied, close Codex/Node/npm terminals and retry from an Administrator PowerShell.'
+        throw
+    }
     return $true
 }
 
