@@ -52,6 +52,33 @@ function Format-MaskedSecret {
   return ($Value.Substring(0, [Math]::Min(6, $Value.Length)) + '...' + $Value.Substring($Value.Length - 4))
 }
 
+function Remove-ControlCharacters {
+  param([string]$Value)
+  if ($null -eq $Value) {
+    return ''
+  }
+
+  return ([regex]::Replace($Value, '[\x00-\x1F\x7F]', '')).Trim()
+}
+
+function Test-ContainsControlCharacters {
+  param([string]$Value)
+  if ($null -eq $Value) {
+    return $false
+  }
+
+  return [regex]::IsMatch($Value, '[\x00-\x1F\x7F]')
+}
+
+function Write-ControlCharacterInputWarning {
+  Write-Host 'Input contained console control characters and they were removed.' -ForegroundColor Yellow
+  Write-Host 'In legacy Windows console, Ctrl+V may be entered as a hidden character instead of paste. Use right-click paste, Shift+Insert, or Windows Terminal.' -ForegroundColor Yellow
+}
+
+function Write-SecretPasteHint {
+  Write-Host 'When pasting OPENAI_API_KEY in legacy Windows console, use right-click paste or Shift+Insert. Do not use Ctrl+V unless you are in Windows Terminal.' -ForegroundColor Cyan
+}
+
 function Show-Crs2ReferenceConfig {
   param(
     [string]$BaseUrl,
@@ -79,7 +106,12 @@ function Read-RequiredValue {
 
   while ($true) {
     $displayPrompt = if ([string]::IsNullOrWhiteSpace($DefaultValue)) { $Prompt } else { "$Prompt [Enter keeps current]" }
-    $value = (Read-Host $displayPrompt).Trim()
+    $rawValue = Read-Host $displayPrompt
+    if (Test-ContainsControlCharacters $rawValue) {
+      Write-ControlCharacterInputWarning
+    }
+
+    $value = Remove-ControlCharacters $rawValue
     if ([string]::IsNullOrWhiteSpace($value) -and -not [string]::IsNullOrWhiteSpace($DefaultValue)) {
       return $DefaultValue
     }
@@ -107,6 +139,11 @@ function Read-SecretValue {
       [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
     }
 
+    if (Test-ContainsControlCharacters $value) {
+      Write-ControlCharacterInputWarning
+    }
+    $value = Remove-ControlCharacters $value
+
     if ([string]::IsNullOrWhiteSpace($value) -and -not [string]::IsNullOrWhiteSpace($DefaultValue)) {
       return $DefaultValue
     }
@@ -122,6 +159,7 @@ $currentOpenAiKey = Get-CurrentOpenAiKey $authPath
 Show-Crs2ReferenceConfig -BaseUrl $currentBaseUrl -OpenAiKey $currentOpenAiKey
 
 $baseUrl = Read-RequiredValue 'Enter CRS 2.0 base_url (example: https://your-crs-host:8443)' $currentBaseUrl
+Write-SecretPasteHint
 $openAiKey = Read-SecretValue 'Enter OPENAI_API_KEY / CRS 2.0 token' $currentOpenAiKey
 
 if (-not (Test-Path -LiteralPath $codexDir)) {
