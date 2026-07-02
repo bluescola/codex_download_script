@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ================= 脚本操作参数 / Operation switches =================
+# 这些变量对应下面 while 参数解析中的命令行开关，默认 0=关闭，1=开启。
+# 用户可以直接修改默认值，或运行脚本时传入对应 -- 参数临时启用。
+
+# --force-node-reinstall：强制重装 Node.js/npm。
 FORCE_NODE_REINSTALL=0
+# --force-codex-reinstall：强制重装 @openai/codex。
 FORCE_CODEX_REINSTALL=0
+# --remove-system-codex：检测并移除系统级 Codex，避免 PATH 命中旧版本。
 REMOVE_SYSTEM_CODEX=0
+# --skip-crs-config：跳过交互式生成 config.toml/auth.json。
 SKIP_CRS_CONFIG=0
+# --skip-no-proxy：跳过 NO_PROXY/no_proxy 绕过代理配置。
 SKIP_NO_PROXY=0
+# --verbose / --trace：控制日志详细程度；也可通过 CODEX_INSTALL_LOG_LEVEL 设置。
+LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,6 +40,14 @@ while [[ $# -gt 0 ]]; do
       SKIP_NO_PROXY=1
       shift
       ;;
+    --verbose)
+      LOG_LEVEL="verbose"
+      shift
+      ;;
+    --trace)
+      LOG_LEVEL="trace"
+      shift
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage: install-codex-cli-mac.sh [options]
@@ -39,6 +58,8 @@ Options:
   --remove-system-codex    Explicitly remove system-level @openai/codex if detected
   --skip-crs-config        Skip interactive CRS config generation
   --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
+  --verbose                Print detailed diagnostic logs
+  --trace                  Print trace-level diagnostic logs
   -h, --help               Show this help
 USAGE
       exit 0
@@ -50,9 +71,29 @@ USAGE
   esac
 done
 
-log_info() { printf '[INFO] %s\n' "$*"; }
-log_warn() { printf '[WARN] %s\n' "$*"; }
-log_ok() { printf '[OK] %s\n' "$*"; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOGGING_MODULE="$REPO_ROOT/script-modules/logging/logging.sh"
+if [[ -f "$LOGGING_MODULE" ]]; then
+  # shellcheck source=../script-modules/logging/logging.sh
+  . "$LOGGING_MODULE"
+else
+  log_info() { printf '[INFO] %s\n' "$*"; }
+  log_warn() { printf '[WARN] %s\n' "$*"; }
+  log_ok() { printf '[OK] %s\n' "$*"; }
+  log_debug() {
+    case "${CODEX_LOG_LEVEL:-${LOG_LEVEL:-normal}}" in
+      verbose|trace) printf '[DEBUG] %s\n' "$*" ;;
+    esac
+  }
+  log_trace() {
+    case "${CODEX_LOG_LEVEL:-${LOG_LEVEL:-normal}}" in
+      trace) printf '[TRACE] %s\n' "$*" ;;
+    esac
+  }
+  codex_log_init() { CODEX_LOG_LEVEL="${1:-normal}"; }
+fi
+codex_log_init "$LOG_LEVEL"
 
 cmd_exists() { command -v "$1" >/dev/null 2>&1; }
 

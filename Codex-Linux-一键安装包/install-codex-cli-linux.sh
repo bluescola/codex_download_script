@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ================= 脚本操作参数 / Operation switches =================
+# 这些变量对应下面 while 参数解析中的命令行开关，默认 0=关闭，1=开启。
+# 用户可以直接修改默认值，或运行脚本时传入对应 -- 参数临时启用。
+
+# --force-node-reinstall：强制重装 Node.js/npm。
 FORCE_NODE_REINSTALL=0
+# --force-codex-reinstall：强制重装 @openai/codex。
 FORCE_CODEX_REINSTALL=0
+# --remove-system-codex：检测并移除系统级 Codex，避免 PATH 命中旧版本。
 REMOVE_SYSTEM_CODEX=0
+# --skip-crs-config：跳过交互式生成 config.toml/auth.json。
 SKIP_CRS_CONFIG=0
+# --skip-no-proxy：跳过 NO_PROXY/no_proxy 绕过代理配置。
 SKIP_NO_PROXY=0
+# --dry-run：只打印环境摘要，不修改文件、环境变量、PATH 或 npm 包。
 DRY_RUN=0
+# --verbose / --trace：控制日志详细程度；也可通过 CODEX_INSTALL_LOG_LEVEL 设置。
 LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
+
 NPM_CONFIG_BACKUPS=()
 NVM_SAFE_STATUS=0
 
