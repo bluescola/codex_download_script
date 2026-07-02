@@ -1,6 +1,9 @@
 param(
+    # 使用静默安装/修复模式；不显示安装界面。
     [switch]$Quiet,
+    # 强制执行 VC++ 运行库修复；未指定时脚本会按检测结果选择安装或修复。
     [switch]$Repair,
+    # 只下载安装包并校验签名，不执行安装。
     [switch]$DownloadOnly
 )
 

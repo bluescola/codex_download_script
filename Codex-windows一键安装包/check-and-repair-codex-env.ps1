@@ -1,5 +1,7 @@
 param(
+    # 额外输出 JSON 结果，便于脚本或自动化工具读取检查/修复结果。
     [switch]$AsJson,
+    # 发现 warning 时也返回失败码；用于 CI 或严格检查场景。
     [switch]$FailOnWarning
 )
 

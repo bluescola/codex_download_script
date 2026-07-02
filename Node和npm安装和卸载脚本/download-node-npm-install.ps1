@@ -1,4 +1,5 @@
 param(
+    # 强制替换用户目录下已存在的 Node.js/npm 安装。
     [switch]$ForceReinstall
 )
 

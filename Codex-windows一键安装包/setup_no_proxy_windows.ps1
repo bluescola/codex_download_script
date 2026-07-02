@@ -7,6 +7,7 @@
 # - Persists across reboot for the current Windows user.
 
 param(
+  # 读取 base_url 的 config.toml 路径；不传时按 CODEX_HOME 和用户目录自动查找。
   [string]$ConfigPath
 )
 
