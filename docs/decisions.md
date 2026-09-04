@@ -19,6 +19,9 @@
 - nvm 是用户级安装，不需要 `sudo npm install -g`，能避开系统目录权限和全局包污染。
 - Codex 安装路径可以被限定在 `NVM_DIR` 下，脚本能拒绝安装到系统 prefix，降低误删和覆盖风险。
 - 非 ASCII HOME/TMPDIR 场景下，脚本可以切换到 `/var/tmp/codex-<uid>` 作为 ASCII-safe 根目录，并同步设置 `CODEX_HOME`。
+- ASCII-safe 判定只检查 `HOME` 和 `TMPDIR`，不检查当前运行目录；preflight 必须输出实际触发变量，避免将中文目录或其他环境变化误判为用户目录问题。
+- 从默认 ASCII-safe 根目录恢复为普通用户目录时，CRS 配置流程只清理安装器写入的旧 `CODEX_HOME=/var/tmp/codex-<uid>/.codex`，避免旧导出覆盖新的 `~/.codex`。
+- 非默认 `NVM_DIR` 必须通过受管区块持久化到 bash/zsh rc 文件，并在安装过程中以无 profile 的 Bash 验证 nvm 初始化后可解析 `codex`；不能只提示用户 `source ~/.bashrc`。
 
 废弃方案：
 
@@ -29,15 +32,16 @@
 
 ## macOS：使用 Homebrew node@24
 
-决策：macOS 安装脚本使用 Homebrew `node@24` 作为目标 Node.js/npm 来源，Codex 只允许安装在 `brew --prefix node@24` 下的 npm prefix。
+决策：macOS 安装脚本使用 Homebrew `node@24` 作为目标 Node.js/npm 来源。普通路径场景把 Codex 安装在 `brew --prefix node@24` 下；只有 HOME/TMPDIR 非 ASCII 时，才将 Codex npm prefix 与 `CODEX_HOME` 放在受限的 ASCII-safe 根目录。
 
 原因：
 
 - macOS 默认 shell、Homebrew 路径和 Apple Silicon/Intel 前缀差异可由 `brew --prefix node@24` 统一解析。
 - `node@24` 是明确的 LTS 线，避免 `node` formula 随上游主线变化带来的行为漂移。
 - Homebrew 是 macOS 用户普遍接受的用户级工具链，适合安装 npm 全局包。
-- 脚本可以检查 npm prefix 是否位于 `node@24` 前缀下，并在 prefix 不可写时明确失败。
-- 因为 `node@24` 是 keg-only，脚本只持久化一个专用 PATH 块，把 `node@24/bin` 去重后置顶，不恢复旧版 npm prefix 环境变量方案。
+- 因为 `node@24` 是 keg-only，脚本以受管 PATH 区块将 Codex npm bin 与 `node@24/bin` 去重置顶，不恢复旧版 npm prefix 环境变量方案。
+- 仅允许 `/Users/Shared/Codex-<name>` 作为 macOS 自定义 ASCII 根目录，已有根目录必须是当前用户所有的真实目录；安装器不再对任意环境变量路径执行权限修改或卸载删除。
+- 从 ASCII-safe 路径恢复到普通 HOME 后，清理安装器写入的旧 ASCII `CODEX_HOME` 导出，避免新终端继续读取旧配置。
 
 废弃方案：
 
@@ -48,7 +52,7 @@
 
 ## Windows：ASCII-safe 与显式 npm 参数
 
-决策：Windows 脚本检测 `USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`TEMP`、`TMP` 是否含非 ASCII 字符；需要时切换到 `C:\Codex` 或 `CODEX_WINDOWS_ASCII_ROOT`。安装 Codex 时显式使用：
+决策：Windows 脚本检测 `USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`TEMP`、`TMP` 是否含非 ASCII 字符；需要时切换到 `C:\Codex` 或受限的 `CODEX_WINDOWS_ASCII_ROOT`。安装 Codex 时显式使用：
 
 ```powershell
 npm install -g --prefix <CodexNpmPrefix> --cache <CodexNpmCache> @openai/codex
@@ -59,7 +63,9 @@ npm install -g --prefix <CodexNpmPrefix> --cache <CodexNpmCache> @openai/codex
 - Windows 上 Node/npm/Codex 原生可执行文件更容易受中文用户名、空格、特殊字符、临时目录编码影响。
 - `--prefix` 和 `--cache` 只约束本次 npm 调用，不污染用户全局 npm 配置。
 - ASCII-safe 根目录同时承载 npm prefix、npm cache、临时目录、`CODEX_HOME` 和用户级 Node.js zip 安装目录，排查路径问题更直接。
+- 自定义根目录只能是本地盘符根下的 `Codex` 或 `Codex-<name>`，且不能是重解析点；ACL 只在新建根目录时写入，卸载也只接受该受限目录作为删除边界。
 - 脚本会将 Codex npm bin 目录写入用户 PATH，并优先检查 `codex.cmd`，降低 PowerShell `codex.ps1` 执行策略造成的误判。
+- 从 ASCII-safe 路径恢复到普通用户目录时，只清理安装器管理的旧 ASCII `CODEX_HOME`，不清理普通自定义配置目录。
 
 废弃方案：
 

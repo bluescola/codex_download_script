@@ -63,19 +63,66 @@ function Test-NeedsAsciiSafePaths {
     return $false
 }
 
-function Resolve-AsciiSafeRoot {
-    foreach ($candidate in @($env:CODEX_WINDOWS_ASCII_ROOT, 'C:\Codex')) {
-        if ([string]::IsNullOrWhiteSpace($candidate)) {
-            continue
-        }
+function ConvertTo-ApprovedAsciiSafeRoot([string]$Candidate) {
+    if ([string]::IsNullOrWhiteSpace($Candidate) -or (Test-ContainsNonAscii $Candidate)) {
+        return $null
+    }
 
-        $trimmed = $candidate.Trim().TrimEnd('\')
-        if (-not (Test-ContainsNonAscii $trimmed)) {
-            return $trimmed
+    try {
+        $normalized = [System.IO.Path]::GetFullPath($Candidate.Trim()).TrimEnd([char[]]@('\', '/'))
+    }
+    catch {
+        return $null
+    }
+
+    if ($normalized -notmatch '^[A-Za-z]:\\Codex(?:-[A-Za-z0-9._-]+)?$') {
+        return $null
+    }
+
+    if (Test-Path -LiteralPath $normalized) {
+        try {
+            $item = Get-Item -LiteralPath $normalized -Force -ErrorAction Stop
+            if ((-not $item.PSIsContainer) -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                return $null
+            }
+        }
+        catch {
+            return $null
         }
     }
 
+    return $normalized
+}
+
+function Resolve-AsciiSafeRoot {
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_WINDOWS_ASCII_ROOT)) {
+        $customRoot = ConvertTo-ApprovedAsciiSafeRoot $env:CODEX_WINDOWS_ASCII_ROOT
+        if ([string]::IsNullOrWhiteSpace($customRoot)) {
+            throw "CODEX_WINDOWS_ASCII_ROOT must be an ASCII-only local drive root named Codex or Codex-<name>: $env:CODEX_WINDOWS_ASCII_ROOT"
+        }
+        return $customRoot
+    }
+
     return 'C:\Codex'
+}
+
+function Test-ManagedCodexHomePath([string]$PathValue) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $false
+    }
+
+    try {
+        $normalized = [System.IO.Path]::GetFullPath($PathValue).TrimEnd([char[]]@('\', '/'))
+    }
+    catch {
+        return $false
+    }
+
+    if ((Split-Path -Leaf $normalized) -ine '.codex') {
+        return $false
+    }
+
+    return -not [string]::IsNullOrWhiteSpace((ConvertTo-ApprovedAsciiSafeRoot (Split-Path -Parent $normalized)))
 }
 
 function Initialize-CodexPathSettings {
@@ -262,7 +309,7 @@ function Get-CandidateCodexHomes {
         if ((Normalize-ComparablePath $env:CODEX_HOME) -ieq (Normalize-ComparablePath $script:CodexHome)) {
             $envCodexHome = $env:CODEX_HOME
         }
-        elseif (Test-PathUnderRoot $env:CODEX_HOME $script:CodexAsciiRoot) {
+        elseif (Test-ManagedCodexHomePath $env:CODEX_HOME) {
             $envCodexHome = $env:CODEX_HOME
         }
         else {

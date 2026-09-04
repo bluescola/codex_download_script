@@ -15,6 +15,8 @@ REMOVE_SYSTEM_CODEX=0
 SKIP_CRS_CONFIG=0
 # --skip-no-proxy：跳过 NO_PROXY/no_proxy 绕过代理配置。
 SKIP_NO_PROXY=0
+# --dry-run：只输出环境摘要和计划动作，不安装、不写配置或环境。
+DRY_RUN=0
 # --verbose / --trace：控制日志详细程度；也可通过 CODEX_INSTALL_LOG_LEVEL 设置。
 LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
 
@@ -40,6 +42,10 @@ while [[ $# -gt 0 ]]; do
       SKIP_NO_PROXY=1
       shift
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     --verbose)
       LOG_LEVEL="verbose"
       shift
@@ -58,6 +64,7 @@ Options:
   --remove-system-codex    Explicitly remove system-level @openai/codex if detected
   --skip-crs-config        Skip interactive CRS config generation
   --skip-no-proxy          Skip NO_PROXY/no_proxy bypass setup
+  --dry-run                Print environment summary and planned actions only
   --verbose                Print detailed diagnostic logs
   --trace                  Print trace-level diagnostic logs
   -h, --help               Show this help
@@ -270,20 +277,57 @@ if detect_ascii_safe_paths; then
   USE_ASCII_SAFE_PATHS=1
 fi
 
+validate_ascii_safe_root() {
+  local candidate="${1:-}"
+  local leaf
+
+  if [[ "$candidate" != "/" ]]; then
+    candidate="${candidate%/}"
+  fi
+  if [[ -z "$candidate" || "$candidate" == "/" || "$candidate" != /Users/Shared/* ]]; then
+    return 1
+  fi
+  if contains_non_ascii "$candidate"; then
+    return 1
+  fi
+
+  leaf="${candidate#/Users/Shared/}"
+  [[ "$leaf" =~ ^Codex-[A-Za-z0-9._-]+$ ]] || return 1
+
+  if [[ -e "$candidate" || -L "$candidate" ]]; then
+    [[ -d "$candidate" && ! -L "$candidate" && -O "$candidate" ]] || return 1
+  fi
+}
+
+resolve_ascii_safe_root() {
+  local candidate="${CODEX_UNIX_ASCII_ROOT:-$DEFAULT_ASCII_ROOT}"
+  if [[ "$candidate" != "/" ]]; then
+    candidate="${candidate%/}"
+  fi
+
+  if ! validate_ascii_safe_root "$candidate"; then
+    echo "[ERROR] CODEX_UNIX_ASCII_ROOT must be an ASCII-only /Users/Shared/Codex-<name> directory: $candidate" >&2
+    exit 1
+  fi
+  printf '%s\n' "$candidate"
+}
+
 if [[ "$USE_ASCII_SAFE_PATHS" -eq 1 ]]; then
-  CODEX_UNIX_ROOT="${CODEX_UNIX_ASCII_ROOT:-$DEFAULT_ASCII_ROOT}"
-  CODEX_UNIX_ROOT="${CODEX_UNIX_ROOT%/}"
+  CODEX_UNIX_ROOT="$(resolve_ascii_safe_root)"
   NODE_ROOT="$CODEX_UNIX_ROOT/node"
   NPM_PREFIX="$CODEX_UNIX_ROOT/npm"
   NPM_CACHE="$CODEX_UNIX_ROOT/npm-cache"
   CODEX_HOME_DIR="$CODEX_UNIX_ROOT/.codex"
 else
   CODEX_UNIX_ROOT=""
-  NODE_ROOT="$HOME/.local/node"
+  NODE_ROOT=""
   NPM_PREFIX="$HOME/.local"
   NPM_CACHE="$HOME/.npm-cache"
   CODEX_HOME_DIR="$HOME/.codex"
 fi
+
+NODE24_PREFIX=""
+NODE24_BIN=""
 
 is_default_codex_home() {
   [[ "$CODEX_HOME_DIR" == "$HOME/.codex" ]]
@@ -297,11 +341,38 @@ initialize_ascii_safe_environment() {
 
   log_warn "Detected non-ASCII characters in HOME/TMPDIR. Using an ASCII-only Codex root to avoid Node/npm/Codex path issues."
   log_info "ASCII Codex root: $CODEX_UNIX_ROOT"
+  local root_existed=0
+  if [[ -d "$CODEX_UNIX_ROOT" ]]; then
+    root_existed=1
+  fi
   mkdir -p "$CODEX_UNIX_ROOT" "$NODE_ROOT" "$NPM_PREFIX" "$NPM_CACHE" "$CODEX_HOME_DIR"
-  chmod 700 "$CODEX_UNIX_ROOT" 2>/dev/null || true
+  if [[ "$root_existed" -eq 0 ]]; then
+    chmod 700 "$CODEX_UNIX_ROOT" 2>/dev/null || true
+  else
+    log_info "Using existing validated ASCII Codex root; preserving its permissions."
+  fi
   export NPM_CONFIG_PREFIX="$NPM_PREFIX"
   export NPM_CONFIG_CACHE="$NPM_CACHE"
   export CODEX_HOME="$CODEX_HOME_DIR"
+}
+
+configure_node24_runtime() {
+  if ! NODE24_PREFIX="$(brew --prefix node@24 2>/dev/null)"; then
+    echo "[ERROR] Homebrew node@24 prefix could not be resolved." >&2
+    exit 1
+  fi
+  NODE24_PREFIX="${NODE24_PREFIX%/}"
+  NODE24_BIN="$NODE24_PREFIX/bin"
+  if [[ ! -x "$NODE24_BIN/node" || ! -x "$NODE24_BIN/npm" ]]; then
+    echo "[ERROR] Homebrew node@24 is incomplete: $NODE24_PREFIX" >&2
+    exit 1
+  fi
+
+  NODE_ROOT="$NODE24_PREFIX"
+  if [[ "$USE_ASCII_SAFE_PATHS" -eq 0 ]]; then
+    NPM_PREFIX="$NODE24_PREFIX"
+  fi
+  export PATH="$NODE24_BIN:$PATH"
 }
 
 install_brew_and_node() {
@@ -332,19 +403,21 @@ install_brew_and_node() {
     log_info "Homebrew already installed."
   fi
 
-  # Install Node via Homebrew
-  log_info "Installing Node.js LTS via Homebrew..."
-  brew install node
+  # node@24 is keg-only; configure_node24_runtime puts it first for this process.
+  log_info "Installing Node.js node@24 via Homebrew..."
+  brew install node@24
+  configure_node24_runtime
 
-  log_ok "Node.js: $(node -v)"
-  log_ok "npm: $(npm -v)"
+  log_ok "Node.js: $($NODE24_BIN/node -v)"
+  log_ok "npm: $($NODE24_BIN/npm -v)"
 }
 
 ensure_node_npm() {
-  if cmd_exists node && cmd_exists npm && [[ "$FORCE_NODE_REINSTALL" -eq 0 ]]; then
-    log_info "Node.js and npm already installed."
-    log_ok "Node.js: $(node -v)"
-    log_ok "npm: $(npm -v)"
+  if cmd_exists brew && brew list --versions node@24 >/dev/null 2>&1 && [[ "$FORCE_NODE_REINSTALL" -eq 0 ]]; then
+    configure_node24_runtime
+    log_info "Homebrew node@24 already installed."
+    log_ok "Node.js: $($NODE24_BIN/node -v)"
+    log_ok "npm: $($NODE24_BIN/npm -v)"
     return 0
   fi
 
@@ -662,41 +735,6 @@ remove_env_from_file() {
   fi
 }
 
-remove_env_from_file() {
-  local file="$1"
-  local key="$2"
-  local expected_value="${3:-}"
-  local expected_quoted=""
-
-  if [[ ! -f "$file" ]]; then
-    return 0
-  fi
-
-  if [[ -n "$expected_value" ]]; then
-    expected_quoted="$(shell_single_quote "$expected_value")"
-  fi
-
-  if grep -qE "^[[:space:]]*export[[:space:]]+${key}=" "$file"; then
-    local tmp
-    tmp="$(mktemp)"
-    awk -v k="$key" -v expected="$expected_value" -v expected_quoted="$expected_quoted" '
-      $0 ~ "^[[:space:]]*export[[:space:]]+" k "=" {
-        rhs = $0
-        sub("^[[:space:]]*export[[:space:]]+" k "=", "", rhs)
-        sub("^[[:space:]]*", "", rhs)
-        if (expected == "" ||
-            rhs == expected ||
-            rhs == expected_quoted ||
-            rhs == "\"" expected "\"") {
-          next
-        }
-      }
-      { print }
-    ' "$file" > "$tmp"
-    mv "$tmp" "$file"
-  fi
-}
-
 escape_json_string() {
   local value="${1:-}"
   value="${value//\\/\\\\}"
@@ -713,7 +751,107 @@ cleanup_obsolete_profile_env() {
     remove_env_from_file "$rc_file" "NPM_CONFIG_CACHE"
     if is_default_codex_home; then
       remove_env_from_file "$rc_file" "CODEX_HOME" "$HOME/.codex"
+      remove_managed_ascii_codex_home_from_file "$rc_file"
     fi
+  done
+}
+
+remove_managed_ascii_codex_home_from_file() {
+  local file="$1"
+  local tmp
+  [[ -f "$file" ]] || return 0
+  grep -qE '^[[:space:]]*export[[:space:]]+CODEX_HOME=' "$file" || return 0
+
+  tmp="$(mktemp)"
+  awk '
+    /^[[:space:]]*export[[:space:]]+CODEX_HOME=/ {
+      value = $0
+      sub("^[[:space:]]*export[[:space:]]+CODEX_HOME=", "", value)
+      sub("^[[:space:]]*", "", value)
+      if ((value ~ /^\047\/Users\/Shared\/Codex-[A-Za-z0-9._-]+\/\.codex\047$/) ||
+          (value ~ /^\"\/Users\/Shared\/Codex-[A-Za-z0-9._-]+\/\.codex\"$/) ||
+          (value ~ /^\/Users\/Shared\/Codex-[A-Za-z0-9._-]+\/\.codex$/)) {
+        next
+      }
+    }
+    { print }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
+
+remove_profile_block() {
+  local file="$1"
+  local start="$2"
+  local end="$3"
+  local tmp
+  [[ -f "$file" ]] || return 0
+  grep -qF "$start" "$file" 2>/dev/null || return 0
+
+  tmp="$(mktemp)"
+  awk -v start="$start" -v end="$end" '
+    index($0, start) { inblock=1; next }
+    index($0, end) { inblock=0; next }
+    !inblock { print }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
+
+ensure_node_path_profiles() {
+  local block_start="# >>> codex node@24 paths >>>"
+  local block_end="# <<< codex node@24 paths <<<"
+  local rc_file
+  local path_entry
+
+  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    [[ -f "$rc_file" ]] || touch "$rc_file"
+    remove_profile_block "$rc_file" "$block_start" "$block_end"
+    {
+      printf '\n%s\n' "$block_start"
+      # Add node first, then Codex, so Codex is the final first PATH entry.
+      for path_entry in "$NODE24_BIN" "$NPM_PREFIX/bin"; do
+        local quoted_path
+        quoted_path="$(shell_single_quote "$path_entry")"
+        printf 'case ":$PATH:" in *:%s:*) ;; *) PATH=%s:"$PATH" ;; esac\n' "$quoted_path" "$quoted_path"
+      done
+      printf 'export PATH\n'
+      printf '%s\n' "$block_end"
+    } >> "$rc_file"
+  done
+  log_ok "Persisted Codex and node@24 PATH in zsh/bash profile files."
+}
+
+verify_managed_codex_path() {
+  local expected="$NPM_PREFIX/bin/codex"
+  local resolved
+  [[ -x "$expected" ]] || {
+    echo "[ERROR] codex is missing from expected PATH location: $expected" >&2
+    exit 1
+  }
+  resolved="$(PATH="$NPM_PREFIX/bin:$NODE24_BIN:$PATH" command -v codex 2>/dev/null || true)"
+  if [[ "$resolved" != "$expected" ]]; then
+    echo "[ERROR] Managed PATH does not resolve codex to $expected (got: ${resolved:-not found})." >&2
+    exit 1
+  fi
+  log_ok "Managed PATH resolves Codex CLI: $resolved"
+}
+
+print_preflight_summary() {
+  local command_path
+  log_info "Preflight environment summary:"
+  log_info "  Platform: $(uname -s) $(uname -m)"
+  log_info "  User: $(id -un) (uid=$(id -u))"
+  log_info "  HOME: ${HOME:-not set}"
+  log_info "  TMPDIR: ${TMPDIR:-not set}"
+  log_info "  ASCII-safe mode: $USE_ASCII_SAFE_PATHS"
+  log_info "  ASCII Codex root: ${CODEX_UNIX_ROOT:-not used}"
+  log_info "  Planned Node source: Homebrew node@24"
+  if [[ "$USE_ASCII_SAFE_PATHS" -eq 1 ]]; then
+    log_info "  Planned Codex npm prefix: $NPM_PREFIX"
+  else
+    log_info "  Planned Codex npm prefix: Homebrew node@24 prefix (resolved during install)"
+  fi
+  for command_path in node npm codex brew; do
+    log_info "  $command_path: $(command -v "$command_path" 2>/dev/null || printf 'not found')"
   done
 }
 
@@ -904,7 +1042,13 @@ configure_no_proxy() {
 main() {
   require_non_root
   require_macos
+  print_preflight_summary
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log_ok "Dry run complete. No packages, files, environment variables, or PATH entries were changed."
+    return 0
+  fi
   initialize_ascii_safe_environment
+  cleanup_obsolete_profile_env
 
   local clean_existing_config=0
   if test_preexisting_node_npm_codex; then
@@ -921,13 +1065,11 @@ main() {
   fi
   ensure_codex_home_profile_env
   ensure_codex
+  ensure_node_path_profiles
+  verify_managed_codex_path
 
   # Clean up legacy path blocks and env vars from pre-Homebrew installer versions.
   cleanup_legacy_path_block
-  for rc_file in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
-    remove_env_from_file "$rc_file" "NPM_CONFIG_PREFIX"
-    remove_env_from_file "$rc_file" "NPM_CONFIG_CACHE"
-  done
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
     configure_crs "$clean_existing_config"

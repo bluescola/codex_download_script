@@ -22,6 +22,7 @@ LOG_LEVEL="${CODEX_INSTALL_LOG_LEVEL:-normal}"
 
 NPM_CONFIG_BACKUPS=()
 NVM_SAFE_STATUS=0
+ASCII_SAFE_PATH_SOURCES=()
 
 contains_non_ascii() {
   local value="${1:-}"
@@ -30,7 +31,16 @@ contains_non_ascii() {
 }
 
 detect_ascii_safe_paths() {
-  contains_non_ascii "${HOME:-}" || contains_non_ascii "${TMPDIR:-}"
+  ASCII_SAFE_PATH_SOURCES=()
+
+  if contains_non_ascii "${HOME:-}"; then
+    ASCII_SAFE_PATH_SOURCES+=("HOME")
+  fi
+  if contains_non_ascii "${TMPDIR:-}"; then
+    ASCII_SAFE_PATH_SOURCES+=("TMPDIR")
+  fi
+
+  [[ "${#ASCII_SAFE_PATH_SOURCES[@]}" -gt 0 ]]
 }
 
 DEFAULT_ASCII_ROOT="/var/tmp/codex-$(id -u 2>/dev/null || printf 'user')"
@@ -177,6 +187,9 @@ print_preflight_summary() {
   log_info "  HOME: ${HOME:-not set}"
   log_info "  TMPDIR: ${TMPDIR:-not set}"
   log_info "  ASCII-safe mode: $USE_ASCII_SAFE_PATHS"
+  if [[ "${#ASCII_SAFE_PATH_SOURCES[@]}" -gt 0 ]]; then
+    log_info "  ASCII-safe trigger: ${ASCII_SAFE_PATH_SOURCES[*]}"
+  fi
   if [[ -n "$CODEX_UNIX_ROOT" ]]; then
     log_info "  ASCII Codex root: $CODEX_UNIX_ROOT"
   fi
@@ -211,7 +224,7 @@ initialize_ascii_safe_environment() {
     return 0
   fi
 
-  log_warn "Detected non-ASCII characters in HOME/TMPDIR. Using an ASCII-only Codex root to avoid Node/npm/Codex path issues."
+  log_warn "Detected non-ASCII characters in: ${ASCII_SAFE_PATH_SOURCES[*]}. Using an ASCII-only Codex root to avoid Node/npm/Codex path issues."
   log_info "ASCII Codex root: $CODEX_UNIX_ROOT"
   mkdir -p "$CODEX_UNIX_ROOT" "$NVM_DIR" "$CODEX_HOME_DIR"
   chmod 700 "$CODEX_UNIX_ROOT" 2>/dev/null || true
@@ -994,6 +1007,97 @@ upsert_env_in_file() {
   mv "$tmp" "$file"
 }
 
+upsert_managed_block_in_file() {
+  local file="$1"
+  local start="$2"
+  local end="$3"
+  local content="$4"
+  local tmp line in_block=0 found=0
+
+  [[ -f "$file" ]] || touch "$file"
+
+  tmp="$(mktemp)"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$start" ]]; then
+      if [[ "$found" -eq 0 ]]; then
+        printf '%s\n' "$content" >> "$tmp"
+        found=1
+      fi
+      in_block=1
+      continue
+    fi
+
+    if [[ "$in_block" -eq 1 ]]; then
+      if [[ "$line" == "$end" ]]; then
+        in_block=0
+      fi
+      continue
+    fi
+
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$file"
+
+  if [[ "$found" -eq 0 ]]; then
+    printf '\n%s\n' "$content" >> "$tmp"
+  fi
+
+  mv "$tmp" "$file"
+}
+
+build_nvm_shell_block() {
+  local shell_name="$1"
+  local quoted_nvm_dir
+  quoted_nvm_dir="$(shell_single_quote "$NVM_DIR")"
+
+  printf '%s\n' '# >>> codex nvm >>>'
+  printf 'export NVM_DIR=%s\n' "$quoted_nvm_dir"
+  printf '%s\n' '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"'
+  if [[ "$shell_name" == "bash" ]]; then
+    printf '%s\n' '[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"'
+  fi
+  printf '%s\n' '# <<< codex nvm <<<'
+}
+
+persist_nvm_shell_init() {
+  # nvm's installer normally handles ~/.nvm. A non-default NVM_DIR needs an
+  # explicit, managed shell block so Node.js and Codex resolve in new terminals.
+  [[ "$NVM_DIR" != "$HOME/.nvm" ]] || return 0
+
+  local rc_file shell_name block
+  for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    if [[ "$rc_file" == */.bashrc ]]; then
+      shell_name="bash"
+    else
+      shell_name="zsh"
+    fi
+
+    block="$(build_nvm_shell_block "$shell_name")"
+    upsert_managed_block_in_file "$rc_file" '# >>> codex nvm >>>' '# <<< codex nvm <<<' "$block"
+    log_info "Persisted nvm initialization in: $rc_file"
+  done
+}
+
+verify_fresh_nvm_shell() {
+  local resolved
+  if ! resolved="$(
+    NVM_DIR="$NVM_DIR" bash --noprofile --norc -c '
+      [ -s "$NVM_DIR/nvm.sh" ] || exit 1
+      . "$NVM_DIR/nvm.sh"
+      command -v codex
+    ' 2>/dev/null
+  )"; then
+    log_warn "Fresh nvm shell could not load Codex from: $NVM_DIR"
+    log_warn "Run: export NVM_DIR=$(shell_single_quote "$NVM_DIR"); . \"\$NVM_DIR/nvm.sh\""
+    return 0
+  fi
+
+  if path_under "$resolved" "$NVM_DIR" && [[ -x "$resolved" ]]; then
+    log_ok "Fresh nvm shell resolves Codex: $resolved"
+  else
+    log_warn "Fresh nvm shell resolved Codex outside the managed nvm directory: ${resolved:-not found}"
+  fi
+}
+
 remove_env_from_file() {
   local file="$1"
   local key="$2"
@@ -1105,6 +1209,7 @@ resolve_crs_base_url() {
 configure_crs() {
   local clean_existing="${1:-0}"
   local codex_dir config_path auth_path base_url_input base_url openai_key escaped_openai_key
+  local legacy_ascii_root legacy_ascii_codex_home
   codex_dir="$CODEX_HOME_DIR"
   config_path="$codex_dir/config.toml"
   auth_path="$codex_dir/auth.json"
@@ -1167,6 +1272,13 @@ CFG
   if [[ "$codex_dir" != "$HOME/.codex" ]]; then
     upsert_env_in_file "$HOME/.bashrc" "CODEX_HOME" "$codex_dir"
     upsert_env_in_file "$HOME/.zshrc" "CODEX_HOME" "$codex_dir"
+  else
+    # When a prior run incorrectly selected the default ASCII-safe root, remove
+    # only that installer's stale export so the standard ~/.codex path wins.
+    legacy_ascii_root="${CODEX_UNIX_ASCII_ROOT:-$DEFAULT_ASCII_ROOT}"
+    legacy_ascii_codex_home="${legacy_ascii_root%/}/.codex"
+    remove_env_from_file "$HOME/.bashrc" "CODEX_HOME" "$legacy_ascii_codex_home"
+    remove_env_from_file "$HOME/.zshrc" "CODEX_HOME" "$legacy_ascii_codex_home"
   fi
   remove_env_from_file "$HOME/.bashrc" "CRS_OAI_KEY"
   remove_env_from_file "$HOME/.zshrc" "CRS_OAI_KEY"
@@ -1226,6 +1338,8 @@ main() {
   remove_env_from_file "$HOME/.bashrc" "NPM_CONFIG_CACHE"
   remove_env_from_file "$HOME/.zshrc" "NPM_CONFIG_PREFIX"
   remove_env_from_file "$HOME/.zshrc" "NPM_CONFIG_CACHE"
+  persist_nvm_shell_init
+  verify_fresh_nvm_shell
 
   if [[ "$SKIP_CRS_CONFIG" -eq 0 ]]; then
     configure_crs "$clean_existing_config"
@@ -1239,7 +1353,11 @@ main() {
 
   printf '\n'
   log_ok "Done."
-  log_info "If environment variables are not visible in current shell, run: source ~/.bashrc"
+  if [[ "$NVM_DIR" != "$HOME/.nvm" ]]; then
+    log_info "Open a new terminal, or run: source ~/.bashrc"
+  else
+    log_info "If environment variables are not visible in current shell, run: source ~/.bashrc"
+  fi
 }
 
 main "$@"

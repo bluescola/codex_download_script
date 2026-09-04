@@ -43,20 +43,21 @@
 6. 检查系统级 Codex：默认告警；传入 `--remove-system-codex` 才移除。
 7. 把 Codex 安装到 nvm npm prefix。
 8. 清理旧 PATH 块、旧 `NPM_CONFIG_*`，并在使用 nvm 前移除冲突的 npmrc `prefix/globalconfig` 和旧安装器 cache。
-9. 写入 CRS 配置和 `auth.json`。
-10. 调用 `setup_no_proxy_linux.sh` 写入 NO_PROXY/no_proxy。
+9. 使用非默认 `NVM_DIR` 时，以受管区块写入 bash/zsh 的 nvm 初始化逻辑，并在无 profile 的新 Bash 中验证 `codex` 可解析。
+10. 写入 CRS 配置和 `auth.json`。
+11. 调用 `setup_no_proxy_linux.sh` 写入 NO_PROXY/no_proxy。
 
 ### macOS
 
 1. 拒绝 root 和非 Darwin 运行。
 2. 加载日志模块，打印 preflight 环境摘要；`--dry-run` 到这里结束。
-3. 检查 HOME/TMPDIR 是否含非 ASCII，必要时使用 `/Users/Shared/Codex-<uid>`。
+3. 检查 HOME/TMPDIR 是否含非 ASCII，必要时使用受限的 `/Users/Shared/Codex-<name>`；拒绝符号链接、非目录和非当前用户所有的已有根目录。
 4. 检查已有 Node/npm/Codex，决定是否为旧 CRS 配置创建临时备份。
 5. 安装或复用 Homebrew，安装 `node@24`。
 6. 检查系统级 Codex：默认告警；传入 `--remove-system-codex` 才移除。
 7. 清理旧安装器 npm 配置；`CODEX_HOME` profile 环境变量只在非默认目录时持久化。
-8. 把 Codex 安装到 Homebrew `node@24` npm prefix。
-9. 清理旧 PATH 块、旧 `NPM_CONFIG_*` 和默认 `CODEX_HOME`，并把 `node@24/bin` 去重置顶写入 zsh/bash profile。
+8. 普通路径场景把 Codex 安装到 Homebrew `node@24` npm prefix；ASCII-safe 场景使用专用根目录 npm prefix。
+9. 清理旧 PATH 块、旧 `NPM_CONFIG_*` 和旧 ASCII `CODEX_HOME`，并将 Codex npm bin 与 `node@24/bin` 写入 zsh/bash 受管 PATH 区块。
 10. 写入 CRS 配置和 `auth.json`。
 11. 调用 `setup_no_proxy_mac.sh` 合并 NO_PROXY/no_proxy，按登录 shell 写入对应 zsh 或 bash profile，并更新 `launchctl` 和 LaunchAgent。
 
@@ -64,7 +65,7 @@
 
 1. `.cmd` 以 `powershell.exe -NoProfile -ExecutionPolicy Bypass` 启动组合包装器。
 2. `install-codex-cli.ps1` 初始化 ASCII-safe 路径设置，加载日志模块，打印 preflight 环境摘要；`-DryRun` 到这里结束。
-3. 如果用户路径含非 ASCII，使用 `C:\Codex` 或 `CODEX_WINDOWS_ASCII_ROOT`，并设置 `CODEX_HOME`。
+3. 如果用户路径含非 ASCII，使用 `C:\Codex` 或受限的 `CODEX_WINDOWS_ASCII_ROOT`，并设置 `CODEX_HOME`；只对新建根目录设置 ACL。
 4. 检查已有 Node/npm/Codex，决定是否清理旧 CRS 配置。
 5. 若 Node/npm 不可用，下载 Node.js LTS zip，校验 SHA256，并原子替换到用户目录。
 6. 检查系统级 Codex：默认告警；传入 `-RemoveSystemCodex` 才移除。
@@ -119,7 +120,8 @@
 - 不要把 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE` 长期写入用户环境；Windows 还要继续清理旧版本曾写入的 `NPM_CONFIG_USERCONFIG`。
 - Windows npm 安装必须继续显式传 `--prefix` 和 `--cache`。
 - Linux Codex 安装目标必须继续在 nvm prefix 下。
-- macOS Codex 安装目标必须继续在 Homebrew `node@24` prefix 下。
+- macOS 普通路径场景的 Codex 安装目标必须继续在 Homebrew `node@24` prefix 下；ASCII-safe 场景只能使用受限专用根目录。
+- macOS/Windows ASCII-safe 根目录不得接受任意环境变量路径，必须拒绝系统目录、用户主目录、磁盘根目录、符号链接或重解析点。
 - 系统级 Codex 默认只告警；删除必须由显式参数触发。
 - 包内 README 不属于维护文档任务范围。
 
@@ -128,7 +130,7 @@
 | 问题 | 优先查看 |
 | --- | --- |
 | Linux 安装失败 | `Codex-Linux-一键安装包/install-codex-cli-linux.sh` 的 `ensure_node_npm`、`ensure_codex`、`resolve_crs_base_url` |
-| macOS 安装失败 | `Codex-Mac-一键安装包/install-codex-cli-mac.sh` 的 `ensure_node_npm`、`ensure_homebrew_node_active`、`ensure_codex` |
+| macOS 安装失败 | `Codex-Mac-一键安装包/install-codex-cli-mac.sh` 的 `ensure_node_npm`、`configure_node24_runtime`、`ensure_codex` |
 | Windows 安装失败 | `Codex-windows一键安装包/install-codex-cli.ps1` 的 `Initialize-CodexPathSettings`、`Ensure-Node`、`Ensure-Codex` |
 | Windows 安装后 `codex` 不可用 | `Codex-windows一键安装包/check-and-repair-codex-env.ps1` |
 | 独立 Node/npm 安装或卸载 | `Node和npm安装和卸载脚本/`，流程见 `docs/graphs/node-npm.drawio` |

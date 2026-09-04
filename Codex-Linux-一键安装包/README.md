@@ -11,7 +11,9 @@ bash install-codex-cli-linux.sh
 ## 行为摘要
 
 - 开头打印 preflight 环境摘要，便于排查 Node/npm/Codex、nvm、路径和代理问题。
+- 启用 ASCII-safe 路径时，preflight 会明确打印触发变量（`HOME` 或 `TMPDIR`），不会把中文运行目录作为切换条件。
 - 通过 nvm 安装或启用 Node.js LTS，并把 Codex 安装到 nvm npm prefix。
+- 当使用非默认 `NVM_DIR`（包括 ASCII-safe 路径）时，向 `~/.bashrc` 和 `~/.zshrc` 写入受管的 nvm 初始化区块，并验证新的 Bash 进程能解析 `codex`。
 - 使用 nvm 前会清理当前进程和 `~/.npmrc` 中与 nvm 冲突的 `prefix/globalconfig`，并移除旧安装器写入的 npm cache 配置。
 - 不长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`。
 - 写入 CRS 配置和 `auth.json`；写入失败时保留本次备份，成功后清理本次备份。

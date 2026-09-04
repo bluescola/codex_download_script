@@ -42,25 +42,68 @@ function Test-ContainsNonAscii([string]$Value) {
     return [regex]::IsMatch($Value, '[^\x00-\x7F]')
 }
 
-function Resolve-AsciiSafeRoot {
-    $candidates = New-Object System.Collections.Generic.List[string]
-    foreach ($candidate in @(
-        $env:CODEX_WINDOWS_ASCII_ROOT,
-        'C:\Codex'
-    )) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
-            [void]$candidates.Add($candidate)
+function ConvertTo-ApprovedAsciiSafeRoot([string]$Candidate) {
+    if ([string]::IsNullOrWhiteSpace($Candidate) -or (Test-ContainsNonAscii $Candidate)) {
+        return $null
+    }
+
+    try {
+        $normalized = [System.IO.Path]::GetFullPath($Candidate.Trim()).TrimEnd([char[]]@('\', '/'))
+    }
+    catch {
+        return $null
+    }
+
+    # Only a dedicated direct child of a local drive is allowed. This keeps ACL
+    # changes and uninstall deletion boundaries away from user and system trees.
+    if ($normalized -notmatch '^[A-Za-z]:\\Codex(?:-[A-Za-z0-9._-]+)?$') {
+        return $null
+    }
+
+    if (Test-Path -LiteralPath $normalized) {
+        try {
+            $item = Get-Item -LiteralPath $normalized -Force -ErrorAction Stop
+            if ((-not $item.PSIsContainer) -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                return $null
+            }
+        }
+        catch {
+            return $null
         }
     }
 
-    foreach ($candidate in $candidates) {
-        $trimmed = $candidate.Trim().TrimEnd('\')
-        if (-not (Test-ContainsNonAscii $trimmed)) {
-            return $trimmed
+    return $normalized
+}
+
+function Resolve-AsciiSafeRoot {
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_WINDOWS_ASCII_ROOT)) {
+        $customRoot = ConvertTo-ApprovedAsciiSafeRoot $env:CODEX_WINDOWS_ASCII_ROOT
+        if ([string]::IsNullOrWhiteSpace($customRoot)) {
+            throw "CODEX_WINDOWS_ASCII_ROOT must be an ASCII-only local drive root named Codex or Codex-<name>: $env:CODEX_WINDOWS_ASCII_ROOT"
         }
+        return $customRoot
     }
 
     return 'C:\Codex'
+}
+
+function Test-ManagedCodexHomePath([string]$PathValue) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $false
+    }
+
+    try {
+        $normalized = [System.IO.Path]::GetFullPath($PathValue).TrimEnd([char[]]@('\', '/'))
+    }
+    catch {
+        return $false
+    }
+
+    if ((Split-Path -Leaf $normalized) -ine '.codex') {
+        return $false
+    }
+
+    return -not [string]::IsNullOrWhiteSpace((ConvertTo-ApprovedAsciiSafeRoot (Split-Path -Parent $normalized)))
 }
 
 function Test-NeedsAsciiSafePaths {
@@ -181,11 +224,13 @@ function Initialize-AsciiSafeEnvironment {
     Ensure-CodexPathSettings
 
     if (-not $script:UseAsciiSafePaths) {
+        Clear-LegacyAsciiCodexHome
         return
     }
 
     Write-WarnMsg 'Detected non-ASCII characters in Windows user paths. Using an ASCII-only Codex root to avoid Node/npm/Codex native path issues.'
     Write-Info "ASCII Codex root: $script:CodexAsciiRoot"
+    $asciiRootExisted = Test-Path -LiteralPath $script:CodexAsciiRoot
 
     foreach ($dir in @(
         $script:CodexAsciiRoot,
@@ -200,21 +245,40 @@ function Initialize-AsciiSafeEnvironment {
         }
     }
 
-    # Lock ASCII-safe root directory to current user only.
-    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    try {
-        $aclArgs = @(
-            $script:CodexAsciiRoot, '/inheritance:r', '/grant:r',
-            "${currentUser}:(OI)(CI)F", '/Q'
-        )
-        & icacls @aclArgs 2>$null
-        Write-Info "Secured ASCII-safe root to current user: $currentUser"
-    } catch {
-        Write-WarnMsg "Unable to set ACL on ASCII-safe root. Ensure adequate permissions on: $script:CodexAsciiRoot"
+    # Only lock a newly created dedicated root. Existing validated roots may be
+    # legacy installer data, so preserve their ACL instead of rewriting it.
+    if (-not $asciiRootExisted) {
+        $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        try {
+            $aclArgs = @(
+                $script:CodexAsciiRoot, '/inheritance:r', '/grant:r',
+                "${currentUser}:(OI)(CI)F", '/Q'
+            )
+            & icacls @aclArgs 2>$null
+            Write-Info "Secured new ASCII-safe root to current user: $currentUser"
+        } catch {
+            Write-WarnMsg "Unable to set ACL on new ASCII-safe root. Ensure adequate permissions on: $script:CodexAsciiRoot"
+        }
+    }
+    else {
+        Write-Info 'Using existing validated ASCII Codex root; preserving its ACL.'
     }
 
     $env:CODEX_HOME = $script:CodexHome
     [Environment]::SetEnvironmentVariable('CODEX_HOME', $script:CodexHome, 'User')
+}
+
+function Clear-LegacyAsciiCodexHome {
+    $userValue = [Environment]::GetEnvironmentVariable('CODEX_HOME', 'User')
+    if (Test-ManagedCodexHomePath $userValue) {
+        [Environment]::SetEnvironmentVariable('CODEX_HOME', $null, 'User')
+        Write-Info "Removed stale installer CODEX_HOME from User environment: $userValue"
+    }
+
+    if (Test-ManagedCodexHomePath $env:CODEX_HOME) {
+        Write-Info "Removed stale installer CODEX_HOME from current process: $env:CODEX_HOME"
+        Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue
+    }
 }
 
 function Get-EnvState([string]$Name) {
@@ -512,6 +576,66 @@ function Normalize-ComparablePath([string]$PathValue) {
     }
     catch {
         return ($PathValue.Trim().TrimEnd([char[]]@('\', '/')))
+    }
+}
+
+function Test-PathMatchesAny([string]$PathValue, [string[]]$Candidates) {
+    $normalizedPath = Normalize-ComparablePath $PathValue
+    if ([string]::IsNullOrWhiteSpace($normalizedPath)) {
+        return $false
+    }
+
+    foreach ($candidate in $Candidates) {
+        $normalizedCandidate = Normalize-ComparablePath $candidate
+        if ((-not [string]::IsNullOrWhiteSpace($normalizedCandidate)) -and
+            ($normalizedPath -ieq $normalizedCandidate)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Clear-InstallerNpmEnvironmentOverrides {
+    Ensure-CodexPathSettings
+
+    $knownPrefixes = @(
+        $script:CodexNpmPrefix,
+        (Join-Path $script:CodexAsciiRoot 'npm')
+    )
+    $knownCaches = @(
+        $script:CodexNpmCache,
+        (Join-Path $script:CodexAsciiRoot 'npm-cache')
+    )
+
+    foreach ($entry in @(
+        @{ Name = 'NPM_CONFIG_PREFIX'; Paths = $knownPrefixes },
+        @{ Name = 'NPM_CONFIG_CACHE'; Paths = $knownCaches }
+    )) {
+        $userValue = [Environment]::GetEnvironmentVariable($entry.Name, 'User')
+        if (Test-PathMatchesAny $userValue $entry.Paths) {
+            [Environment]::SetEnvironmentVariable($entry.Name, $null, 'User')
+            Write-Info "Removed legacy installer $($entry.Name) from User environment."
+        }
+
+        $processValue = [Environment]::GetEnvironmentVariable($entry.Name, 'Process')
+        if (Test-PathMatchesAny $processValue $entry.Paths) {
+            Remove-Item "Env:$($entry.Name)" -ErrorAction SilentlyContinue
+        }
+    }
+
+    $knownRoot = $script:CodexAsciiRoot
+    foreach ($scope in @('User', 'Process')) {
+        $value = [Environment]::GetEnvironmentVariable('NPM_CONFIG_USERCONFIG', $scope)
+        if ((-not [string]::IsNullOrWhiteSpace($value)) -and (Test-PathUnderRoot $value $knownRoot)) {
+            if ($scope -eq 'User') {
+                [Environment]::SetEnvironmentVariable('NPM_CONFIG_USERCONFIG', $null, 'User')
+            }
+            else {
+                Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue
+            }
+            Write-Info "Removed legacy installer NPM_CONFIG_USERCONFIG from $scope environment."
+        }
     }
 }
 
@@ -992,35 +1116,8 @@ function Ensure-NpmUserPrefix {
     New-Item -ItemType Directory -Path $target -Force | Out-Null
     New-Item -ItemType Directory -Path $cache -Force | Out-Null
 
-    Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue
-    Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue
-    Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue
-    [Environment]::SetEnvironmentVariable('NPM_CONFIG_PREFIX', $null, 'User')
-    [Environment]::SetEnvironmentVariable('NPM_CONFIG_CACHE', $null, 'User')
-    [Environment]::SetEnvironmentVariable('NPM_CONFIG_USERCONFIG', $null, 'User')
-
-    $npmPath = Resolve-NpmCommandPath
-    if ([string]::IsNullOrWhiteSpace($npmPath)) {
-        Write-WarnMsg 'npm was not found; cannot persist npm user prefix for future Codex updates.'
-    }
-    else {
-        & $npmPath config set prefix $target --location user | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to set npm user prefix to Codex install target: $target"
-        }
-
-        $resolvedPrefix = (& $npmPath config get prefix 2>$null)
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($resolvedPrefix)) {
-            $resolvedPrefix = $resolvedPrefix.Trim()
-            if ((Normalize-ComparablePath $resolvedPrefix) -ine (Normalize-ComparablePath $target)) {
-                throw "npm prefix mismatch after configuration. Expected '$target', got '$resolvedPrefix'."
-            }
-        }
-
-        Write-Info "Pinned npm user prefix for future Codex updates: $target"
-    }
-
-    Write-Info "Codex npm prefix for this install: $target"
+    Clear-InstallerNpmEnvironmentOverrides
+    Write-Info "Codex npm prefix for this install: $target (passed explicitly to npm; user npm config is unchanged)"
 }
 
 function Resolve-NodeInstallDir {

@@ -392,6 +392,7 @@ cleanup_profiles_and_environment() {
   for file in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
     remove_profile_block "$file" "# >>> codex no_proxy >>>" "# <<< codex no_proxy <<<"
     remove_profile_block "$file" "# >>> codex user paths >>>" "# <<< codex user paths <<<"
+    remove_profile_block "$file" "# >>> codex nvm >>>" "# <<< codex nvm <<<"
     remove_env_from_file "$file" "CODEX_HOME" "$CODEX_HOME_DIR"
     remove_env_from_file "$file" "CRS_OAI_KEY"
     remove_env_from_file "$file" "NPM_CONFIG_PREFIX" "$HOME/.npm-global"

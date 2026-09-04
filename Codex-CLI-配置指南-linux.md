@@ -203,11 +203,24 @@ nano ~/.codex/auth.json
 
 ### 步骤 4: 可选设置 CODEX_HOME
 
-如果安装脚本因为中文路径兼容问题启用了 ASCII 安全目录，你可能还需要保留 `CODEX_HOME`：
+如果安装脚本因为中文路径兼容问题启用了 ASCII 安全目录，它会持久化 `CODEX_HOME` 和对应的 `NVM_DIR` 初始化区块。安装完成后打开新终端，或执行：
 
 ```bash
-export CODEX_HOME="/var/tmp/codex-$(id -u)/.codex"
+source ~/.bashrc
+echo "${CODEX_HOME:-$HOME/.codex}"
+command -v codex
 ```
+
+预期 `command -v codex` 输出位于 `/var/tmp/codex-<uid>/.nvm/versions/node/.../bin/codex` 的路径。若需要在不读取 `~/.bashrc` 的当前 shell 临时修复，可执行：
+
+```bash
+export NVM_DIR="/var/tmp/codex-$(id -u)/.nvm"
+. "$NVM_DIR/nvm.sh"
+nvm use default
+hash -r
+```
+
+如果旧版安装器曾误用 `/var/tmp/codex-<uid>`，而新版 `--dry-run` 已显示 `ASCII-safe mode: 0`，重新完成一次 CRS 配置后，安装器会移除它自己写入的旧 `CODEX_HOME` 导出，并改用 `~/.codex`。
 
 ---
 
@@ -344,21 +357,25 @@ grep -E 'model_provider|requires_openai_auth|base_url' ~/.codex/config.toml
 
 ### Q3: 每次打开新终端都找不到配置
 
-**原因**：使用了非默认配置目录，但 `CODEX_HOME` 未正确持久化
+**原因**：使用了非默认 ASCII-safe 目录，但 shell 未加载 `CODEX_HOME` 或 nvm。
 
 **解决方法**：
 
-1. 确认当前配置目录：
+1. 确认当前终端是否加载了配置和 nvm：
 ```bash
 echo "${CODEX_HOME:-$HOME/.codex}"
 ls -la "${CODEX_HOME:-$HOME/.codex}"
+echo "${NVM_DIR:-$HOME/.nvm}"
+command -v codex
 ```
 
-2. 如果一键安装脚本启用了 ASCII 安全目录，持久化 `CODEX_HOME`：
+2. 使用一键安装脚本后，重新打开终端或加载对应 shell 配置：
 ```bash
-echo 'export CODEX_HOME="/var/tmp/codex-你的uid/.codex"' >> ~/.bashrc
 source ~/.bashrc
+codex --version
 ```
+
+3. 若仍找不到，检查 `~/.bashrc` 是否有 `# >>> codex nvm >>>` 区块；没有时用上方“步骤 4”的临时修复命令加载 nvm，然后重新运行最新版安装器。
 
 ---
 

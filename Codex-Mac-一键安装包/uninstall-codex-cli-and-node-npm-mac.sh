@@ -42,7 +42,7 @@ Options:
   --keep-codex-home          Keep CODEX_HOME / ~/.codex
   --keep-npm-cache           Keep installer npm cache
   --skip-node-uninstall      Remove Codex only; leave Node.js/npm untouched
-  --force-remove-shared-node Also uninstall Homebrew node; may affect other tools
+  --force-remove-shared-node Also uninstall Homebrew node@24; may affect other tools
   --skip-system-codex        Do not try to remove system-level Codex under /opt, /usr/local, or /usr
   -h, --help                 Show this help
 USAGE
@@ -114,17 +114,58 @@ if detect_ascii_safe_paths; then
   USE_ASCII_SAFE_PATHS=1
 fi
 
+validate_ascii_safe_root() {
+  local candidate="${1:-}"
+  local leaf
+
+  if [[ "$candidate" != "/" ]]; then
+    candidate="${candidate%/}"
+  fi
+  if [[ -z "$candidate" || "$candidate" == "/" || "$candidate" != /Users/Shared/* ]]; then
+    return 1
+  fi
+  if contains_non_ascii "$candidate"; then
+    return 1
+  fi
+
+  leaf="${candidate#/Users/Shared/}"
+  [[ "$leaf" =~ ^Codex-[A-Za-z0-9._-]+$ ]] || return 1
+
+  if [[ -e "$candidate" || -L "$candidate" ]]; then
+    [[ -d "$candidate" && ! -L "$candidate" && -O "$candidate" ]] || return 1
+  fi
+}
+
+resolve_ascii_safe_root() {
+  local candidate="${CODEX_UNIX_ASCII_ROOT:-$DEFAULT_ASCII_ROOT}"
+  if [[ "$candidate" != "/" ]]; then
+    candidate="${candidate%/}"
+  fi
+  if ! validate_ascii_safe_root "$candidate"; then
+    echo "[ERROR] CODEX_UNIX_ASCII_ROOT must be an ASCII-only /Users/Shared/Codex-<name> directory: $candidate" >&2
+    exit 1
+  fi
+  printf '%s\n' "$candidate"
+}
+
+resolve_node24_prefix() {
+  if cmd_exists brew && brew list --versions node@24 >/dev/null 2>&1; then
+    brew --prefix node@24 2>/dev/null || true
+  fi
+}
+
+NODE24_PREFIX="$(resolve_node24_prefix)"
+
 if [[ "$USE_ASCII_SAFE_PATHS" -eq 1 ]]; then
-  CODEX_UNIX_ROOT="${CODEX_UNIX_ASCII_ROOT:-$DEFAULT_ASCII_ROOT}"
-  CODEX_UNIX_ROOT="${CODEX_UNIX_ROOT%/}"
+  CODEX_UNIX_ROOT="$(resolve_ascii_safe_root)"
   NODE_ROOT="$CODEX_UNIX_ROOT/node"
   NPM_PREFIX="$CODEX_UNIX_ROOT/npm"
   NPM_CACHE="$CODEX_UNIX_ROOT/npm-cache"
   CODEX_HOME_DIR="$CODEX_UNIX_ROOT/.codex"
 else
   CODEX_UNIX_ROOT=""
-  NODE_ROOT="$HOME/.local/node"
-  NPM_PREFIX="$HOME/.local"
+  NODE_ROOT="${NODE24_PREFIX:-$HOME/.local/node}"
+  NPM_PREFIX="${NODE24_PREFIX:-$HOME/.local}"
   NPM_CACHE="$HOME/.npm-cache"
   CODEX_HOME_DIR="$HOME/.codex"
 fi
@@ -186,6 +227,7 @@ collect_codex_prefixes() {
   local prefix cmd_path
 
   append_unique CODEX_PREFIXES "$(trim_trailing_slash "$NPM_PREFIX")"
+  append_unique CODEX_PREFIXES "$HOME/.local"
 
   prefix="$(current_npm_prefix)"
   if [[ -n "$prefix" ]]; then
@@ -285,7 +327,7 @@ uninstall_codex_at_prefix() {
   npm_cmd="$(command -v npm 2>/dev/null || true)"
   log_info "Uninstalling @openai/codex from npm prefix: $prefix"
   if [[ -n "$npm_cmd" ]]; then
-    if path_under "$prefix" "$HOME" || { [[ -n "$CODEX_UNIX_ROOT" ]] && path_under "$prefix" "$CODEX_UNIX_ROOT"; }; then
+    if path_under "$prefix" "$HOME" || { [[ -n "$CODEX_UNIX_ROOT" ]] && path_under "$prefix" "$CODEX_UNIX_ROOT"; } || { [[ -n "$NODE24_PREFIX" ]] && [[ "$prefix" == "$NODE24_PREFIX" ]]; }; then
       "$npm_cmd" uninstall -g --prefix "$prefix" @openai/codex >/dev/null 2>&1 || \
         log_warn "npm uninstall did not fully remove Codex from: $prefix"
     else
@@ -296,7 +338,7 @@ uninstall_codex_at_prefix() {
     log_warn "npm not found; removing Codex residue directly for: $prefix"
   fi
 
-  if path_under "$prefix" "$HOME" || { [[ -n "$CODEX_UNIX_ROOT" ]] && path_under "$prefix" "$CODEX_UNIX_ROOT"; }; then
+  if path_under "$prefix" "$HOME" || { [[ -n "$CODEX_UNIX_ROOT" ]] && path_under "$prefix" "$CODEX_UNIX_ROOT"; } || { [[ -n "$NODE24_PREFIX" ]] && [[ "$prefix" == "$NODE24_PREFIX" ]]; }; then
     remove_path_if_safe "$prefix/bin/codex" "$prefix"
     remove_path_if_safe "$prefix/lib/node_modules/@openai/codex" "$prefix"
     remove_empty_dir "$prefix/lib/node_modules/@openai"
@@ -369,6 +411,7 @@ cleanup_profiles_and_environment() {
   for file in "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     remove_profile_block "$file" "# >>> codex no_proxy >>>" "# <<< codex no_proxy <<<"
     remove_profile_block "$file" "# >>> codex user paths >>>" "# <<< codex user paths <<<"
+    remove_profile_block "$file" "# >>> codex node@24 paths >>>" "# <<< codex node@24 paths <<<"
     remove_env_from_file "$file" "CODEX_HOME" "$CODEX_HOME_DIR"
     remove_env_from_file "$file" "CRS_OAI_KEY"
     remove_env_from_file "$file" "NPM_CONFIG_PREFIX" "$NPM_PREFIX"
@@ -445,9 +488,9 @@ uninstall_node_npm() {
 
   if [[ "$FORCE_REMOVE_SHARED_NODE" -eq 1 ]]; then
     if cmd_exists brew; then
-      log_warn "Force removing Homebrew node. This may affect other tools."
-      brew uninstall node >/dev/null 2>&1 || brew uninstall --ignore-dependencies node >/dev/null 2>&1 || \
-        log_warn "Homebrew node uninstall did not complete."
+      log_warn "Force removing Homebrew node@24. This may affect other tools."
+      brew uninstall node@24 >/dev/null 2>&1 || brew uninstall --ignore-dependencies node@24 >/dev/null 2>&1 || \
+        log_warn "Homebrew node@24 uninstall did not complete."
     else
       log_warn "Homebrew not found; shared node/npm were not removed."
     fi
@@ -455,8 +498,8 @@ uninstall_node_npm() {
   fi
 
   if cmd_exists node || cmd_exists npm; then
-    log_warn "node/npm still exist on PATH, but macOS installer may have reused shared Homebrew Node."
-    log_warn "Leaving shared Node.js/npm installed. Rerun with --force-remove-shared-node to remove Homebrew node."
+    log_warn "node/npm still exist on PATH, but macOS installer uses shared Homebrew node@24."
+    log_warn "Leaving shared Node.js/npm installed. Rerun with --force-remove-shared-node to remove Homebrew node@24."
   else
     log_ok "Node.js/npm are not found on PATH."
   fi

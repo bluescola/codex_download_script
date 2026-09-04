@@ -16,19 +16,44 @@ function Test-ContainsNonAscii([string]$Value) {
     return [regex]::IsMatch($Value, '[^\x00-\x7F]')
 }
 
-function Resolve-AsciiSafeRoot {
-    foreach ($candidate in @(
-        $env:CODEX_WINDOWS_ASCII_ROOT,
-        'C:\Codex'
-    )) {
-        if ([string]::IsNullOrWhiteSpace($candidate)) {
-            continue
-        }
+function ConvertTo-ApprovedAsciiSafeRoot([string]$Candidate) {
+    if ([string]::IsNullOrWhiteSpace($Candidate) -or (Test-ContainsNonAscii $Candidate)) {
+        return $null
+    }
 
-        $trimmed = $candidate.Trim().TrimEnd('\')
-        if (-not (Test-ContainsNonAscii $trimmed)) {
-            return $trimmed
+    try {
+        $normalized = [System.IO.Path]::GetFullPath($Candidate.Trim()).TrimEnd([char[]]@('\', '/'))
+    }
+    catch {
+        return $null
+    }
+
+    if ($normalized -notmatch '^[A-Za-z]:\\Codex(?:-[A-Za-z0-9._-]+)?$') {
+        return $null
+    }
+
+    if (Test-Path -LiteralPath $normalized) {
+        try {
+            $item = Get-Item -LiteralPath $normalized -Force -ErrorAction Stop
+            if ((-not $item.PSIsContainer) -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                return $null
+            }
         }
+        catch {
+            return $null
+        }
+    }
+
+    return $normalized
+}
+
+function Resolve-AsciiSafeRoot {
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_WINDOWS_ASCII_ROOT)) {
+        $customRoot = ConvertTo-ApprovedAsciiSafeRoot $env:CODEX_WINDOWS_ASCII_ROOT
+        if ([string]::IsNullOrWhiteSpace($customRoot)) {
+            throw "CODEX_WINDOWS_ASCII_ROOT must be an ASCII-only local drive root named Codex or Codex-<name>: $env:CODEX_WINDOWS_ASCII_ROOT"
+        }
+        return $customRoot
     }
 
     return 'C:\Codex'
@@ -220,42 +245,6 @@ function Test-SystemInstallPath([string]$PathValue) {
     }
 
     return $false
-}
-
-function Set-NpmUserPrefix([string]$Prefix) {
-    if ([string]::IsNullOrWhiteSpace($Prefix)) {
-        return $false
-    }
-
-    if (Test-SystemInstallPath $Prefix) {
-        Write-WarnMsg "Refusing to set npm user prefix to a system-level directory: $Prefix"
-        return $false
-    }
-
-    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
-    if (-not $npmCmd) {
-        Write-WarnMsg 'npm was not found; cannot repair npm prefix.'
-        return $false
-    }
-
-    Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue
-    Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue
-    [Environment]::SetEnvironmentVariable('NPM_CONFIG_PREFIX', $null, 'User')
-    [Environment]::SetEnvironmentVariable('NPM_CONFIG_USERCONFIG', $null, 'User')
-
-    & npm config set prefix $Prefix --location user | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-WarnMsg "npm config set prefix failed for: $Prefix"
-        return $false
-    }
-
-    $resolved = Try-GetNpmPrefix
-    if ([string]::IsNullOrWhiteSpace($resolved) -or (Normalize-Path $resolved) -ne (Normalize-Path $Prefix)) {
-        Write-WarnMsg "npm prefix still does not match Codex path after repair. Expected '$Prefix', got '$resolved'."
-        return $false
-    }
-
-    return $true
 }
 
 function Resolve-CodexBinDir {
@@ -673,16 +662,10 @@ if (-not [string]::IsNullOrWhiteSpace($codexBinDir)) {
         $warnings.Add($msg)
         Write-WarnMsg $msg
 
-        if (Set-NpmUserPrefix $codexBinDir) {
-            $npmPrefixAfterRepair = Try-GetNpmPrefix
-            $npmPrefixStatus = 'repaired'
-            Write-Ok "npm user prefix repaired to active Codex path: $codexBinDir"
-        }
-        else {
-            $msg = "Failed to repair npm prefix to active Codex path: $codexBinDir"
-            $failures.Add($msg)
-            Write-Fail $msg
-        }
+        $npmPrefixStatus = 'mismatch_not_modified'
+        $msg = 'The repair tool no longer writes npm prefix to user .npmrc. Rerun install-codex-cli.cmd for explicit --prefix installation.'
+        $warnings.Add($msg)
+        Write-WarnMsg $msg
     }
     else {
         $npmPrefixStatus = 'matched'

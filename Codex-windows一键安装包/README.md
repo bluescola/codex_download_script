@@ -12,7 +12,7 @@
 ## 行为摘要
 
 - 主安装脚本开头打印 preflight 环境摘要，便于排查 Node/npm/Codex、PowerShell、PATH、执行策略和 ASCII-safe 路径问题。
-- 中文或非 ASCII 用户路径场景下使用 `C:\Codex` 或 `CODEX_WINDOWS_ASCII_ROOT`，并给根目录设置仅当前用户可访问的 ACL。
+- 中文或非 ASCII 用户路径场景下使用 `C:\Codex` 或受限的 `CODEX_WINDOWS_ASCII_ROOT`。自定义目录只能是本地盘符根下的 `Codex` 或 `Codex-<name>`，拒绝重解析点；仅新建根目录时设置当前用户 ACL，已有目录保留原 ACL。
 - Node.js 不可用时下载官方 LTS zip，校验 SHA256 后安装到用户目录。
 - 安装 Codex 时显式使用 npm `--prefix` 和 `--cache`，不长期写入 `NPM_CONFIG_PREFIX`、`NPM_CONFIG_CACHE`、`NPM_CONFIG_USERCONFIG`。
 - 系统级 Codex 默认只告警；只有显式传 `-RemoveSystemCodex` 才移除。
