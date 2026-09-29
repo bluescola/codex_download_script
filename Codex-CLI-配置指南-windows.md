@@ -98,33 +98,17 @@ model_provider = "OpenAI"
 model = "gpt-5.5"
 review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
-disable_response_storage = true
-network_access = "enabled"
 
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
-# 正常模式：
+# 受限模式：用下面两项替换上面两项
 # sandbox_mode = "workspace-write"
 # approval_policy = "on-request"
 
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "https://your-crs-host:8443"
-wire_api = "responses"
 requires_openai_auth = true
-
-[features]
-# 实际已去除
-tui_app_server = false
-# 关闭MCP和 工具 / 列表 / 发现/建议
-apps = false
-
-[notice.model_migrations]
-"gpt-5.1-codex-max" = "gpt-5.4"
-"gpt-5.2" = "gpt-5.4"
-
-[windows]
-sandbox = "elevated"
 ```
 
 **⚠️ 重要修改**：将 `base_url` 中的地址替换为管理员提供的服务器地址。

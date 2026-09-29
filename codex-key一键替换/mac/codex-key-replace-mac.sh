@@ -181,28 +181,17 @@ model_provider = "OpenAI"
 model = "gpt-5.5"
 review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
-disable_response_storage = true
-network_access = "enabled"
 
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
-# Normal mode:
+# Restricted mode: replace the two settings above.
 # sandbox_mode = "workspace-write"
 # approval_policy = "on-request"
 
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${escaped_base_url}"
-wire_api = "responses"
 requires_openai_auth = true
-
-[features]
-tui_app_server = false
-apps = false
-
-[notice.model_migrations]
-"gpt-5.1-codex-max" = "gpt-5.4"
-"gpt-5.2" = "gpt-5.4"
 EOF
 
 printf '{\n  "OPENAI_API_KEY": "%s"\n}\n' "$escaped_openai_key" > "$AUTH_PATH"

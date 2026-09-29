@@ -79,10 +79,12 @@
 三平台都写入同类配置：
 
 - `model_provider = "OpenAI"`
-- `wire_api = "responses"`
 - `requires_openai_auth = true`
-- `disable_response_storage = true`
+- `model`、`review_model`、`model_reasoning_effort` 指定 CRS 支持的模型和推理深度
+- `sandbox_mode = "danger-full-access"`、`approval_policy = "never"` 保持当前安装器的默认执行策略
 - `auth.json` 中写入 `OPENAI_API_KEY`
+
+不再写入已移除的 TUI 功能开关、无效的顶层联网和响应存储设置，也不预填模型迁移提示记录。`apps` 使用 Codex 默认值；需要禁用连接器时由用户自行配置。
 
 维护重点：
 

@@ -1238,30 +1238,17 @@ model_provider = "OpenAI"
 model = "gpt-5.5"
 review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
-disable_response_storage = true
-network_access = "enabled"
 
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
-# Normal mode:
+# Restricted mode: replace the two settings above.
 # sandbox_mode = "workspace-write"
 # approval_policy = "on-request"
 
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "$base_url_toml"
-wire_api = "responses"
 requires_openai_auth = true
-
-[features]
-# 实际已去除
-tui_app_server = false
-# 关闭MCP和 工具 / 列表 / 发现/建议
-apps = false
-
-[notice.model_migrations]
-"gpt-5.1-codex-max" = "gpt-5.4"
-"gpt-5.2" = "gpt-5.4"
 CFG
 
   printf '{\n  "OPENAI_API_KEY": "%s"\n}\n' "$escaped_openai_key" > "$auth_path"
