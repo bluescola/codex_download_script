@@ -5,6 +5,7 @@
     [switch]$RemoveSystemCodex,
     [string]$UninstallSystemCodexPrefix,
     [string]$NpmCommandPath,
+    [string]$NpmRegistry,
     [switch]$DryRun,
     [switch]$VerboseLog,
     [switch]$TraceLog
@@ -33,6 +34,7 @@ $script:VerboseLogRequested = Test-BoundSwitch -BoundParameters $PSBoundParamete
 $script:TraceLogRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters -Name 'TraceLog'
 $script:UninstallSystemCodexPrefixRequested = if ($PSBoundParameters.ContainsKey('UninstallSystemCodexPrefix')) { $PSBoundParameters['UninstallSystemCodexPrefix'] } else { $null }
 $script:NpmCommandPathRequested = if ($PSBoundParameters.ContainsKey('NpmCommandPath')) { $PSBoundParameters['NpmCommandPath'] } else { $null }
+$script:NpmRegistryRequested = if ($PSBoundParameters.ContainsKey('NpmRegistry')) { $PSBoundParameters['NpmRegistry'] } else { $null }
 
 function Test-ContainsNonAscii([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -829,6 +831,179 @@ function Resolve-NpmCommandPath {
     }
 
     return $null
+}
+
+function Get-NpmConfigValue([string]$Name) {
+    $npmPath = Resolve-NpmCommandPath
+    if ([string]::IsNullOrWhiteSpace($npmPath)) {
+        return $null
+    }
+
+    $savedErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $npmPath config get $Name 2>$null
+        $exitCode = $LASTEXITCODE
+    }
+    catch {
+        return $null
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorAction
+    }
+
+    if ($exitCode -ne 0) {
+        return $null
+    }
+
+    $value = (@($output) -join "`n").Trim()
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -in @('undefined', 'null')) {
+        return $null
+    }
+
+    return $value
+}
+
+function ConvertTo-DisplayNetworkValue([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return '<not set>'
+    }
+
+    try {
+        $uri = [Uri]$Value.Trim()
+        if ($uri.UserInfo) {
+            return '{0}://***@{1}' -f $uri.Scheme, $uri.Authority.Substring($uri.UserInfo.Length + 1)
+        }
+    }
+    catch {
+    }
+
+    return $Value.Trim()
+}
+
+function Get-NpmRegistryForInstall {
+    $rawRegistry = if (-not [string]::IsNullOrWhiteSpace($script:NpmRegistryRequested)) {
+        $script:NpmRegistryRequested
+    }
+    else {
+        Get-NpmConfigValue 'registry'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($rawRegistry)) {
+        $rawRegistry = 'https://registry.npmjs.org/'
+        Write-WarnMsg "npm registry was not available from configuration; using default: $rawRegistry"
+    }
+
+    try {
+        $registryUri = [Uri]$rawRegistry.Trim()
+    }
+    catch {
+        throw "Invalid npm registry URL: $rawRegistry"
+    }
+
+    if (-not $registryUri.IsAbsoluteUri -or $registryUri.Scheme -notin @('http', 'https') -or
+        [string]::IsNullOrWhiteSpace($registryUri.Host)) {
+        throw "npm registry must be an absolute http(s) URL: $rawRegistry"
+    }
+
+    return $registryUri.AbsoluteUri.TrimEnd('/')
+}
+
+function Write-NpmNetworkDiagnostics([string]$Registry) {
+    $registryUri = [Uri]$Registry
+    Write-Info "npm registry: $Registry"
+    if ($script:NpmRegistryRequested) {
+        Write-Info 'npm registry source: -NpmRegistry command-line override'
+    }
+    else {
+        Write-Info 'npm registry source: npm user/system configuration'
+    }
+
+    $proxyNames = @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')
+    $proxySummary = foreach ($name in $proxyNames) {
+        "$name=$(ConvertTo-DisplayNetworkValue ([Environment]::GetEnvironmentVariable($name)))"
+    }
+    Write-Info ('Proxy environment: ' + ($proxySummary -join '; '))
+
+    $npmProxy = ConvertTo-DisplayNetworkValue (Get-NpmConfigValue 'proxy')
+    $npmHttpsProxy = ConvertTo-DisplayNetworkValue (Get-NpmConfigValue 'https-proxy')
+    $npmNoProxy = ConvertTo-DisplayNetworkValue (Get-NpmConfigValue 'noproxy')
+    Write-Info "npm proxy config: proxy=$npmProxy; https-proxy=$npmHttpsProxy; noproxy=$npmNoProxy"
+
+    try {
+        $addresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+            Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -ne '0.0.0.0' } |
+            Select-Object -ExpandProperty IPAddress -Unique)
+        $gateways = @(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.NextHop) } |
+            Select-Object -ExpandProperty NextHop -Unique)
+        Write-Info "Local IPv4: $(if ($addresses.Count) { $addresses -join ', ' } else { '<not available>' })"
+        Write-Info "Default gateway: $(if ($gateways.Count) { $gateways -join ', ' } else { '<not available>' })"
+    }
+    catch {
+        Write-WarnMsg "Local network interface details unavailable: $($_.Exception.Message)"
+    }
+
+    try {
+        $dnsAddresses = @([System.Net.Dns]::GetHostAddresses($registryUri.DnsSafeHost) |
+            Select-Object -ExpandProperty IPAddressToString -Unique)
+        Write-Info "DNS $($registryUri.DnsSafeHost): $(if ($dnsAddresses.Count) { $dnsAddresses -join ', ' } else { '<no address>' })"
+    }
+    catch {
+        Write-WarnMsg "DNS lookup failed for $($registryUri.DnsSafeHost): $($_.Exception.Message)"
+    }
+
+    if (Get-Command Test-NetConnection -ErrorAction SilentlyContinue) {
+        try {
+            $tcpOk = Test-NetConnection -ComputerName $registryUri.DnsSafeHost -Port $registryUri.Port -InformationLevel Quiet -WarningAction SilentlyContinue
+            Write-Info "TCP $($registryUri.DnsSafeHost):$($registryUri.Port): $(if ($tcpOk) { 'reachable' } else { 'unreachable' })"
+        }
+        catch {
+            Write-WarnMsg "TCP probe failed for $($registryUri.DnsSafeHost):$($registryUri.Port): $($_.Exception.Message)"
+        }
+    }
+}
+
+function Test-NpmRegistryReachability([string]$Registry) {
+    $npmPath = Resolve-NpmCommandPath
+    if ([string]::IsNullOrWhiteSpace($npmPath)) {
+        throw 'npm was not found; cannot validate the npm registry before download.'
+    }
+
+    Write-NpmNetworkDiagnostics $Registry
+    Write-Info "Testing npm registry before download: $Registry"
+    $savedErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $probeOutput = @(& $npmPath ping --registry $Registry --fetch-timeout 10000 --fetch-retries 0 2>&1)
+        $probeExit = $LASTEXITCODE
+    }
+    catch {
+        $probeOutput = @($_.Exception.Message)
+        $probeExit = 1
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorAction
+    }
+
+    foreach ($line in $probeOutput) {
+        $text = "$line".Trim()
+        if (-not [string]::IsNullOrWhiteSpace($text)) {
+            Write-Info "[npm ping] $text"
+        }
+    }
+
+    if ($probeExit -ne 0) {
+        $hint = if ($Registry -match '(?i)registry\.npm\.taobao\.org') {
+            '这是已废弃的旧淘宝域名，建议改用 https://registry.npmmirror.com 或 https://registry.npmjs.org。'
+        }
+        else {
+            '请检查 registry 地址、系统时间、代理和证书链。'
+        }
+        throw "npm registry 不可达或 TLS 证书校验失败: $Registry。$hint 不要通过 strict-ssl=false 绕过证书校验。"
+    }
+
+    Write-Ok "npm registry reachable: $Registry"
 }
 
 function Add-SystemCodexCandidate {
@@ -1904,7 +2079,22 @@ function Install-CodexPackage {
 
     $npmPrefixForInstall = Get-CodexNpmPrefix
     $npmCacheForInstall = Get-CodexNpmCache
-    & npm install -g --prefix $npmPrefixForInstall --cache $npmCacheForInstall '@openai/codex'
+    $npmPath = Resolve-NpmCommandPath
+    if ([string]::IsNullOrWhiteSpace($npmPath)) {
+        throw 'npm was not found before Codex installation.'
+    }
+    $registryForInstall = Get-NpmRegistryForInstall
+    Test-NpmRegistryReachability $registryForInstall
+
+    $npmInstallArgs = @(
+        'install',
+        '-g',
+        '--prefix', $npmPrefixForInstall,
+        '--cache', $npmCacheForInstall,
+        '--registry', $registryForInstall,
+        '@openai/codex'
+    )
+    & $npmPath @npmInstallArgs
     $installExit = $LASTEXITCODE
     if ($installExit -eq 0) {
         return
@@ -1929,7 +2119,7 @@ function Install-CodexPackage {
 
     $npmPrefixForInstall = Get-CodexNpmPrefix
     $npmCacheForInstall = Get-CodexNpmCache
-    & npm install -g --prefix $npmPrefixForInstall --cache $npmCacheForInstall '@openai/codex'
+    & $npmPath @npmInstallArgs
     $retryExit = $LASTEXITCODE
     if ($retryExit -ne 0) {
         throw "npm install -g @openai/codex failed (exit $retryExit). Close terminals/tools using codex.exe and retry."

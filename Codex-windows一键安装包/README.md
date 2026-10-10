@@ -27,8 +27,26 @@
 - `-TraceLog`：打印 trace 级诊断。
 - `-ForceNodeReinstall`：强制重装 Node.js/npm。
 - `-ForceCodexReinstall`：强制重装 `@openai/codex`。
+- `-NpmRegistry <URL>`：本次安装临时指定 npm registry；下载前会打印代理、DNS、TCP 探测和 `npm ping` 结果，不修改 npm 配置。
 - `-RemoveSystemCodex`：显式移除检测到的系统级 Codex。
 - `-SkipCrsConfig`：跳过 CRS 配置交互。
+
+## npm registry 排查
+
+安装器会读取当前 npm registry，并在下载 `@openai/codex` 前使用同一个地址执行网络诊断和 `npm ping`。registry 不可达、TLS 证书过期或代理配置异常时，安装会在下载前停止。
+
+旧地址 `https://registry.npm.taobao.org` 已废弃，证书错误时不要使用 `strict-ssl=false` 绕过校验。可以改用官方源，或显式指定仍可用的国内镜像：
+
+```powershell
+install-codex-cli.cmd -NpmRegistry https://registry.npmmirror.com
+```
+
+也可以先确认当前 npm 配置：
+
+```powershell
+npm config get registry
+npm ping --registry https://registry.npmmirror.com
+```
 
 卸载参数可追加在 `uninstall-codex-cli-and-node-npm.cmd` 或 `uninstall-codex-cli-and-node-npm.ps1` 后面：
 

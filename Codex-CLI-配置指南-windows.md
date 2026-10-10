@@ -43,6 +43,19 @@ npm i -g @openai/codex
 codex --version
 ```
 
+如果 npm 报 `CERT_HAS_EXPIRED`，先检查 registry 和网络连通性：
+
+```powershell
+npm config get registry
+npm ping --registry https://registry.npmmirror.com
+```
+
+`https://registry.npm.taobao.org` 是已废弃的旧地址，证书错误时不要设置 `strict-ssl=false`。可临时使用官方源或新的国内镜像：
+
+```powershell
+npm i -g --registry https://registry.npmmirror.com @openai/codex
+```
+
 > 若提示 `codex` 不是内部或外部命令，请先重开终端；仍不行再检查 npm 全局 bin 是否在 PATH。
 
 ---

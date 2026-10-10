@@ -3,6 +3,7 @@ param(
     [switch]$ForceCodexReinstall,
     [switch]$RemoveSystemCodex,
     [switch]$SkipCrsConfig,
+    [string]$NpmRegistry,
     [switch]$DryRun,
     [switch]$VerboseLog,
     [switch]$TraceLog
@@ -77,6 +78,7 @@ try {
     if ($script:ForceCodexReinstallRequested) { $installParams['ForceCodexReinstall'] = $true }
     if ($script:RemoveSystemCodexRequested) { $installParams['RemoveSystemCodex'] = $true }
     if ($script:SkipCrsConfigRequested) { $installParams['SkipCrsConfig'] = $true }
+    if ($PSBoundParameters.ContainsKey('NpmRegistry')) { $installParams['NpmRegistry'] = $NpmRegistry }
     if ($script:DryRun) { $installParams['DryRun'] = $true }
     if ($script:VerboseLogRequested) { $installParams['VerboseLog'] = $true }
     if ($script:TraceLogRequested) { $installParams['TraceLog'] = $true }
