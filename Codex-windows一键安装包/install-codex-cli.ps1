@@ -35,6 +35,7 @@ $script:TraceLogRequested = Test-BoundSwitch -BoundParameters $PSBoundParameters
 $script:UninstallSystemCodexPrefixRequested = if ($PSBoundParameters.ContainsKey('UninstallSystemCodexPrefix')) { $PSBoundParameters['UninstallSystemCodexPrefix'] } else { $null }
 $script:NpmCommandPathRequested = if ($PSBoundParameters.ContainsKey('NpmCommandPath')) { $PSBoundParameters['NpmCommandPath'] } else { $null }
 $script:NpmRegistryRequested = if ($PSBoundParameters.ContainsKey('NpmRegistry')) { $PSBoundParameters['NpmRegistry'] } else { $null }
+$script:NpmRegistryFallbackUsed = $false
 
 function Test-ContainsNonAscii([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -881,6 +882,10 @@ function ConvertTo-DisplayNetworkValue([string]$Value) {
     return $Value.Trim()
 }
 
+function Test-IsLegacyTaobaoRegistry([Uri]$RegistryUri) {
+    return ($RegistryUri.Host -ieq 'registry.npm.taobao.org')
+}
+
 function Get-NpmRegistryForInstall {
     $rawRegistry = if (-not [string]::IsNullOrWhiteSpace($script:NpmRegistryRequested)) {
         $script:NpmRegistryRequested
@@ -906,6 +911,14 @@ function Get-NpmRegistryForInstall {
         throw "npm registry must be an absolute http(s) URL: $rawRegistry"
     }
 
+    if ([string]::IsNullOrWhiteSpace($script:NpmRegistryRequested) -and (Test-IsLegacyTaobaoRegistry $registryUri)) {
+        $script:NpmRegistryFallbackUsed = $true
+        $fallbackRegistry = 'https://registry.npmmirror.com'
+        Write-WarnMsg "Detected deprecated npm registry: $rawRegistry"
+        Write-WarnMsg "Using domestic mirror for this installation only: $fallbackRegistry (npm configuration will not be changed)."
+        return $fallbackRegistry
+    }
+
     return $registryUri.AbsoluteUri.TrimEnd('/')
 }
 
@@ -914,6 +927,9 @@ function Write-NpmNetworkDiagnostics([string]$Registry) {
     Write-Info "npm registry: $Registry"
     if ($script:NpmRegistryRequested) {
         Write-Info 'npm registry source: -NpmRegistry command-line override'
+    }
+    elseif ($script:NpmRegistryFallbackUsed) {
+        Write-Info 'npm registry source: automatic fallback from deprecated registry.npm.taobao.org'
     }
     else {
         Write-Info 'npm registry source: npm user/system configuration'

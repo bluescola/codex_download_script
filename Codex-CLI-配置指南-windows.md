@@ -50,7 +50,7 @@ npm config get registry
 npm ping --registry https://registry.npmmirror.com
 ```
 
-`https://registry.npm.taobao.org` 是已废弃的旧地址，证书错误时不要设置 `strict-ssl=false`。可临时使用官方源或新的国内镜像：
+`https://registry.npm.taobao.org` 是已废弃的旧地址，Windows 一键安装器检测到它时会在本次安装中自动临时切换到 `https://registry.npmmirror.com`，不会修改 npm 配置。手工安装时可使用官方源或新的国内镜像：
 
 ```powershell
 npm i -g --registry https://registry.npmmirror.com @openai/codex

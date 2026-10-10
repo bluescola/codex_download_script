@@ -33,9 +33,9 @@
 
 ## npm registry 排查
 
-安装器会读取当前 npm registry，并在下载 `@openai/codex` 前使用同一个地址执行网络诊断和 `npm ping`。registry 不可达、TLS 证书过期或代理配置异常时，安装会在下载前停止。
+安装器会读取当前 npm registry，并在下载 `@openai/codex` 前使用同一个地址执行网络诊断和 `npm ping`。检测到已废弃的 `https://registry.npm.taobao.org` 时，会仅在本次安装中自动切换到 `https://registry.npmmirror.com`，不会修改 npm 配置；其他 registry 不可达、TLS 证书过期或代理配置异常时，安装会在下载前停止。
 
-旧地址 `https://registry.npm.taobao.org` 已废弃，证书错误时不要使用 `strict-ssl=false` 绕过校验。可以改用官方源，或显式指定仍可用的国内镜像：
+旧地址 `https://registry.npm.taobao.org` 已废弃，证书错误时不要使用 `strict-ssl=false` 绕过校验。安装器会自动临时使用新的国内镜像；也可以显式指定官方源或国内镜像：
 
 ```powershell
 install-codex-cli.cmd -NpmRegistry https://registry.npmmirror.com
