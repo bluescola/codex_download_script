@@ -54,6 +54,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-serv
 restart-codex-app-server.cmd
 ```
 
+执行前必须在当前 PowerShell 设置 Sub2API 客户端 key：
+
+```powershell
+$env:CRS_OAI_KEY = '你的 Sub2API 客户端 API Key'
+```
+
+脚本会停止旧 daemon，再启动新 daemon，并检查 daemon 版本。该 key 必须是 Sub2API 中生成的客户端 Key，不是上游 OpenAI 账号凭据。
+
 验证：
 
 ```powershell
@@ -69,7 +77,8 @@ codex app-server daemon version
 - 本工具只管理 Windows Codex。WSL daemon 必须在 WSL 内单独执行：
 
   ```powershell
-  wsl.exe -- sh -lc 'codex app-server daemon restart'
+  wsl.exe -- sh -lc 'codex app-server daemon stop'
+  wsl.exe -- sh -lc 'codex app-server daemon start'
   wsl.exe -- sh -lc 'codex app-server daemon version'
   ```
 

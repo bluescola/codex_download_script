@@ -5,6 +5,11 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if ([string]::IsNullOrWhiteSpace($env:CRS_OAI_KEY)) {
+    Write-Host '[ERROR] CRS_OAI_KEY 未设置' -ForegroundColor Red
+    exit 1
+}
+
 $loggingModule = Join-Path (Split-Path -Parent $PSScriptRoot) 'script-modules\logging\logging.ps1'
 if (Test-Path -LiteralPath $loggingModule -PathType Leaf) {
     . $loggingModule
@@ -216,16 +221,38 @@ function Write-CommandOutput([object]$Result) {
     }
 }
 
-function Test-UnsupportedDaemonRestart([string]$OutputText) {
+function Test-UnsupportedDaemonCommand([string]$OutputText) {
     if ([string]::IsNullOrWhiteSpace($OutputText)) {
         return $false
     }
 
-    return $OutputText -match '(?is)(unknown|unrecognized|invalid|unsupported|not supported|does not support|no such command|unexpected).{0,120}(command|subcommand|app-server|daemon|restart)|(command|subcommand|app-server|daemon|restart).{0,120}(unknown|unrecognized|invalid|unsupported|not supported|does not support|no such command|unexpected)'
+    return $OutputText -match '(?is)(unknown|unrecognized|invalid|unsupported|not supported|does not support|no such command|unexpected).{0,120}(command|subcommand|app-server|daemon|stop|start)|(command|subcommand|app-server|daemon|stop|start).{0,120}(unknown|unrecognized|invalid|unsupported|not supported|does not support|no such command|unexpected)'
+}
+
+function Invoke-DaemonCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('stop', 'start')]
+        [string]$Action,
+        [Parameter(Mandatory = $true)]
+        [string]$CommandPath
+    )
+
+    Write-Info "执行：codex app-server daemon $Action"
+    $result = Invoke-CodexCommand -CommandPath $CommandPath -Arguments @('app-server', 'daemon', $Action)
+    Write-CommandOutput -Result $result
+    if ($result.ExitCode -ne 0) {
+        if (Test-UnsupportedDaemonCommand $result.OutputText) {
+            throw "当前 Codex 版本不支持 app-server daemon $Action（退出码：$($result.ExitCode)）。"
+        }
+
+        throw "app-server daemon $Action 失败（退出码：$($result.ExitCode)）。"
+    }
 }
 
 function Write-TroubleshootingHints {
     Write-WarnMsg '命令失败时，请分别检查：'
+    Write-Host '  CRS_OAI_KEY'
     Write-Host '  codex login status'
     Write-Host '  codex app-server daemon version'
     Write-Host '  CODEX_HOME'
@@ -255,7 +282,7 @@ try {
     }
 
     Write-Host ''
-    Write-Info "即将执行：codex app-server daemon restart"
+    Write-Info '即将停止并重新启动 codex app-server daemon'
     Write-WarnMsg '重启可能中断正在运行的 app-server 任务，请先确认没有重要任务执行。'
     $cancelled = $false
     if (-not $Force) {
@@ -268,15 +295,8 @@ try {
     }
 
     if (-not $cancelled) {
-        $restartResult = Invoke-CodexCommand -CommandPath $codexCommand -Arguments @('app-server', 'daemon', 'restart')
-        if ($restartResult.ExitCode -ne 0) {
-            if (Test-UnsupportedDaemonRestart $restartResult.OutputText) {
-                throw "当前 Codex 版本不支持 app-server daemon restart（退出码：$($restartResult.ExitCode)）。"
-            }
-
-            throw "app-server daemon restart 失败（退出码：$($restartResult.ExitCode)）。"
-        }
-        Write-Ok 'app-server daemon restart 已完成。'
+        Invoke-DaemonCommand -Action 'stop' -CommandPath $codexCommand
+        Invoke-DaemonCommand -Action 'start' -CommandPath $codexCommand
 
         Write-Info '执行 app-server daemon version，以下为原样输出：'
         $daemonVersionResult = Invoke-CodexCommand -CommandPath $codexCommand -Arguments @('app-server', 'daemon', 'version')

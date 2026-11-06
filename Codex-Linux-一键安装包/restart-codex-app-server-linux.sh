@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -z "${CRS_OAI_KEY:-}" ]]; then
+  printf '%s\n' '[ERROR] CRS_OAI_KEY 未设置' >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOGGING_MODULE="$REPO_ROOT/script-modules/logging/logging.sh"
@@ -68,7 +73,7 @@ CODEX_COMMAND="$(type -P codex 2>/dev/null || true)"
 if [[ -z "$CODEX_COMMAND" || ! -x "$CODEX_COMMAND" ]]; then
   log_error '找不到 codex 命令。请确认 Codex CLI 已安装且当前 shell 的 PATH 已加载。'
   log_warn '命令失败时，请分别检查：'
-  printf '%s\n' '  codex login status' '  codex app-server daemon version' '  CODEX_HOME' '  config.toml' '  auth.json'
+  printf '%s\n' '  CRS_OAI_KEY' '  codex login status' '  codex app-server daemon version' '  CODEX_HOME' '  config.toml' '  auth.json'
   exit 1
 fi
 log_info "Codex 命令路径: $CODEX_COMMAND"
@@ -77,7 +82,7 @@ CODEX_OUTPUT=''
 CODEX_EXIT_CODE=0
 invoke_codex() {
   set +e
-  CODEX_OUTPUT="$(CODEX_HOME="$CODEX_HOME_DIR" "$CODEX_COMMAND" "$@" 2>&1)"
+  CODEX_OUTPUT="$(CRS_OAI_KEY="$CRS_OAI_KEY" CODEX_HOME="$CODEX_HOME_DIR" "$CODEX_COMMAND" "$@" 2>&1)"
   CODEX_EXIT_CODE=$?
   set -e
 }
@@ -93,6 +98,44 @@ print_failure_hints() {
   printf '%s\n' '  codex login status' '  codex app-server daemon version' '  CODEX_HOME' '  config.toml' '  auth.json'
 }
 
+run_daemon_command() {
+  local action="$1"
+
+  log_info "执行：codex app-server daemon $action"
+  invoke_codex app-server daemon "$action"
+  print_command_output
+  if [[ "$CODEX_EXIT_CODE" -ne 0 ]]; then
+    if printf '%s' "$CODEX_OUTPUT" | grep -Eiq '(unknown|unrecognized|invalid|unsupported|not supported|does not support|no such command|unexpected).{0,120}(command|subcommand|app-server|daemon|stop|start)|(command|subcommand|app-server|daemon|stop|start).{0,120}(unknown|unrecognized|invalid|unsupported|not supported|does not support|no such command|unexpected)'; then
+      log_error "当前 Codex 版本不支持 app-server daemon $action（退出码：$CODEX_EXIT_CODE）。"
+    else
+      log_error "app-server daemon $action 失败（退出码：$CODEX_EXIT_CODE）。"
+    fi
+    print_failure_hints
+    exit 1
+  fi
+}
+
+verify_linux_app_server_environment() {
+  local pid=''
+  local attempt
+
+  for attempt in {1..20}; do
+    pid="$(pgrep -f 'codex app-server --listen' | head -n1 || true)"
+    if [[ -n "$pid" ]] && [[ -r "/proc/$pid/environ" ]] && tr '\0' '\n' < "/proc/$pid/environ" | grep -F -x -q -- "CRS_OAI_KEY=$CRS_OAI_KEY"; then
+      log_ok "CRS_OAI_KEY 已传入 app-server（PID: $pid，值已隐藏）。"
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  if [[ -z "$pid" ]]; then
+    log_error "未找到 codex app-server --listen 进程，无法验证 CRS_OAI_KEY。"
+  else
+    log_error "CRS_OAI_KEY 未传入 app-server（PID: $pid）。"
+  fi
+  return 1
+}
+
 invoke_codex --version
 log_info '当前 Codex 版本：'
 print_command_output
@@ -102,7 +145,7 @@ if [[ "$CODEX_EXIT_CODE" -ne 0 || -z "$CODEX_OUTPUT" ]]; then
   exit 1
 fi
 
-log_info '即将执行：codex app-server daemon restart'
+log_info '即将停止并重新启动 codex app-server daemon'
 log_warn '重启可能中断正在运行的 app-server 任务，请先确认没有重要任务执行。'
 if [[ "$FORCE" -eq 0 ]]; then
   read -r -p '确认继续重启 app-server daemon？输入 Y 继续，其他输入取消: ' confirmation || confirmation=''
@@ -112,17 +155,8 @@ if [[ "$FORCE" -eq 0 ]]; then
   fi
 fi
 
-invoke_codex app-server daemon restart
-if [[ "$CODEX_EXIT_CODE" -ne 0 ]]; then
-  if printf '%s' "$CODEX_OUTPUT" | grep -Eiq '(unknown|unrecognized|invalid|unsupported|not supported|does not support|no such command|unexpected).{0,120}(command|subcommand|app-server|daemon|restart)|(command|subcommand|app-server|daemon|restart).{0,120}(unknown|unrecognized|invalid|unsupported|not supported|does not support|no such command|unexpected)'; then
-    log_error "当前 Codex 版本不支持 app-server daemon restart（退出码：$CODEX_EXIT_CODE）。"
-  else
-    log_error "app-server daemon restart 失败（退出码：$CODEX_EXIT_CODE）。"
-  fi
-  print_failure_hints
-  exit 1
-fi
-log_ok 'app-server daemon restart 已完成。'
+run_daemon_command stop
+run_daemon_command start
 
 log_info '执行 app-server daemon version，以下为原样输出：'
 invoke_codex app-server daemon version
@@ -133,3 +167,4 @@ if [[ "$CODEX_EXIT_CODE" -ne 0 || -z "$CODEX_OUTPUT" ]]; then
   exit 1
 fi
 log_ok 'app-server daemon version 检查通过。'
+verify_linux_app_server_environment

@@ -254,7 +254,7 @@ model_reasoning_effort = "medium"
 # model = "gpt-5.5"
 ```
 
-普通 CLI 新进程可能会重新读取配置；为了确保已经运行的 app-server 使用新配置或新认证，应显式执行当前 macOS 环境的 app-server daemon restart。
+普通 CLI 新进程可能会重新读取配置；为了确保已经运行的 app-server 使用当前 Sub2API key，应在当前 shell 设置 `CRS_OAI_KEY`，再显式停止并启动当前 macOS 环境的 app-server daemon。
 
 ### 手动重启 app-server
 
@@ -267,6 +267,14 @@ bash ./Codex-Mac-一键安装包/restart-codex-app-server-mac.sh
 ```bash
 bash ./Codex-Mac-一键安装包/restart-codex-app-server-mac.sh --force
 ```
+
+执行前：
+
+```bash
+export CRS_OAI_KEY='你的 Sub2API 客户端 API Key'
+```
+
+脚本会执行 `codex app-server daemon stop`、`codex app-server daemon start` 和 `codex app-server daemon version`。该 key 必须是 Sub2API 客户端 Key，不是上游 OpenAI 账号凭据。
 
 验证：
 

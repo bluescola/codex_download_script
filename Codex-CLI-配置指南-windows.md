@@ -273,7 +273,7 @@ model_reasoning_effort = "medium"
 # model = "gpt-5.5"
 ```
 
-普通 CLI 新进程可能会重新读取配置；为了确保已经运行的 app-server 使用新配置或新认证，应显式执行 app-server daemon restart。
+普通 CLI 新进程可能会重新读取配置；为了确保已经运行的 app-server 使用当前 Sub2API key，应在当前 PowerShell 设置 `CRS_OAI_KEY`，再显式停止并启动 app-server daemon。
 
 ### 手动重启 app-server
 
@@ -288,6 +288,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-serv
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-server.ps1 -Force
 ```
+
+执行前：
+
+```powershell
+$env:CRS_OAI_KEY = '你的 Sub2API 客户端 API Key'
+```
+
+脚本会执行 `codex app-server daemon stop`、`codex app-server daemon start` 和 `codex app-server daemon version`。该 key 必须是 Sub2API 客户端 Key，不是上游 OpenAI 账号凭据。
 
 命令提示符：
 
@@ -311,7 +319,8 @@ codex app-server daemon version
 Windows 工具只管理 Windows Codex；WSL daemon 必须在 WSL 内单独执行：
 
 ```powershell
-wsl.exe -- sh -lc 'codex app-server daemon restart'
+wsl.exe -- sh -lc 'codex app-server daemon stop'
+wsl.exe -- sh -lc 'codex app-server daemon start'
 wsl.exe -- sh -lc 'codex app-server daemon version'
 ```
 
@@ -347,7 +356,7 @@ wsl.exe -- sh -lc 'codex app-server daemon version'
    Get-Content (Join-Path $codexHome 'auth.json')
    ```
 2. 确认 `config.toml` 使用 OpenAI-compatible 配置。
-3. 执行 `codex app-server daemon restart` 后再试。
+3. 在当前 PowerShell 设置正确的 Sub2API 客户端 `CRS_OAI_KEY`，执行 `restart-codex-app-server.ps1` 让 daemon 完整停止并重新启动后再试。
 4. 仍失败请联系管理员更换 Key。
 
 ---

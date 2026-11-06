@@ -45,6 +45,14 @@ bash restart-codex-app-server-linux.sh
 bash restart-codex-app-server-linux.sh --force
 ```
 
+执行前必须设置当前 shell 的 Sub2API 客户端 key：
+
+```bash
+export CRS_OAI_KEY='你的 Sub2API 客户端 API Key'
+```
+
+脚本会停止旧 daemon，再启动新 daemon，并检查新进程是否继承 `CRS_OAI_KEY`。该 key 必须是 Sub2API 中生成的客户端 Key，不是上游 OpenAI 账号凭据。
+
 验证：
 
 ```bash
