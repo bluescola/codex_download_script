@@ -31,6 +31,28 @@ bash install-codex-cli-linux.sh
 - `--skip-crs-config`：跳过 CRS 配置交互。
 - `--skip-no-proxy`：跳过 NO_PROXY/no_proxy 配置。
 
+## 手动重启 app-server
+
+更新认证或配置后，使用 Linux 原生脚本重新加载 app-server：
+
+```bash
+bash restart-codex-app-server-linux.sh
+```
+
+跳过确认：
+
+```bash
+bash restart-codex-app-server-linux.sh --force
+```
+
+验证：
+
+```bash
+codex app-server daemon version
+```
+
+更新 `auth.json` 或重新登录、修改 `provider`/`base_url`/`env_key`，或 CLI 正常但 app-server 子模块返回 401 时，应重启 daemon。重启可能中断正在运行的 app-server 任务，请先确认没有重要任务执行。此脚本只管理当前 Linux 环境中的 Codex，不调用 Windows PowerShell 或 WSL。
+
 ## 维护入口
 
 - 总览：[../docs/script-system-overview.md](../docs/script-system-overview.md)

@@ -7,6 +7,7 @@
 - `install-codex-cli.cmd`：安装 Codex CLI，写 CRS 配置，并配置 NO_PROXY。
 - `uninstall-codex-cli-and-node-npm.cmd`：卸载 Codex CLI，并在确认属于本安装包目标路径时清理用户级 Node.js/npm。
 - `check-and-repair-codex-env.cmd`：安装后检查并修复 PATH、PowerShell 执行策略、`codex.cmd`/`codex.ps1` 等问题。
+- `restart-codex-app-server.cmd`：手动重启 Windows Codex app-server daemon，并检查 daemon 版本。
 - `install-vc-redist-x64.cmd`：安装或修复 Microsoft Visual C++ Redistributable 2015-2022 x64。
 
 ## 行为摘要
@@ -30,6 +31,49 @@
 - `-NpmRegistry <URL>`：本次安装临时指定 npm registry；下载前会打印代理、DNS、TCP 探测和 `npm ping` 结果，不修改 npm 配置。
 - `-RemoveSystemCodex`：显式移除检测到的系统级 Codex。
 - `-SkipCrsConfig`：跳过 CRS 配置交互。
+
+## 手动重启 app-server
+
+更新认证或配置后，使用以下入口手动重新加载 app-server：
+
+PowerShell：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-server.ps1
+```
+
+跳过确认：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-server.ps1 -Force
+```
+
+命令提示符：
+
+```cmd
+restart-codex-app-server.cmd
+```
+
+验证：
+
+```powershell
+codex app-server daemon version
+```
+
+需要注意：
+
+- 更新 `auth.json` 或重新登录后，需要重启 app-server 才能确保它使用新认证。
+- 修改 `provider`、`base_url`、`env_key` 等配置后，需要重启 app-server 才能确保新进程重新加载配置。
+- CLI 能请求成功但 app-server 子模块返回 401 时，应先重启 daemon。
+- 重启会影响正在运行的 app-server 任务，请先确认没有重要任务执行。
+- 本工具只管理 Windows Codex。WSL daemon 必须在 WSL 内单独执行：
+
+  ```powershell
+  wsl.exe -- sh -lc 'codex app-server daemon restart'
+  wsl.exe -- sh -lc 'codex app-server daemon version'
+  ```
+
+脚本只在本次 PowerShell 进程及其 Codex 子进程中设置 `CODEX_HOME`，不会修改用户持久化环境变量，也不会读取或打印 `auth.json` 内容。
 
 ## npm registry 排查
 

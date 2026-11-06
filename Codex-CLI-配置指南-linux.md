@@ -295,7 +295,27 @@ model_reasoning_effort = "medium"
 # model = "gpt-5.5"
 ```
 
-修改后立即生效，无需重启。
+普通 CLI 新进程可能会重新读取配置；为了确保已经运行的 app-server 使用新配置或新认证，应显式执行当前 Linux 环境的 app-server daemon restart。
+
+### 手动重启 app-server
+
+```bash
+bash ./Codex-Linux-一键安装包/restart-codex-app-server-linux.sh
+```
+
+跳过确认：
+
+```bash
+bash ./Codex-Linux-一键安装包/restart-codex-app-server-linux.sh --force
+```
+
+验证：
+
+```bash
+codex app-server daemon version
+```
+
+更新 `auth.json` 或重新登录、修改 `provider`/`base_url`/`env_key`，或 CLI 正常但 app-server 子模块返回 401 时，应重启 daemon。重启可能中断正在运行的 app-server 任务，请先确认没有重要任务执行。
 
 ---
 

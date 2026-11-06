@@ -273,7 +273,47 @@ model_reasoning_effort = "medium"
 # model = "gpt-5.5"
 ```
 
-修改后立即生效，无需重启（但建议重开一次终端以避免环境变量/Path 未刷新）。
+普通 CLI 新进程可能会重新读取配置；为了确保已经运行的 app-server 使用新配置或新认证，应显式执行 app-server daemon restart。
+
+### 手动重启 app-server
+
+PowerShell：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-server.ps1
+```
+
+跳过确认：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-server.ps1 -Force
+```
+
+命令提示符：
+
+```cmd
+restart-codex-app-server.cmd
+```
+
+验证：
+
+```powershell
+codex app-server daemon version
+```
+
+以下情况需要重启：
+
+- 更新 `auth.json` 或重新登录后，需要重启 app-server 才能确保它使用新认证。
+- 修改 `provider`、`base_url`、`env_key` 等配置后，需要重启 app-server 才能确保新进程重新加载配置。
+- CLI 能请求成功但 app-server 子模块返回 401 时，先重启 daemon。
+- 重启会影响正在运行的 app-server 任务，应先确认没有重要任务执行。
+
+Windows 工具只管理 Windows Codex；WSL daemon 必须在 WSL 内单独执行：
+
+```powershell
+wsl.exe -- sh -lc 'codex app-server daemon restart'
+wsl.exe -- sh -lc 'codex app-server daemon version'
+```
 
 ---
 
@@ -307,7 +347,8 @@ model_reasoning_effort = "medium"
    Get-Content (Join-Path $codexHome 'auth.json')
    ```
 2. 确认 `config.toml` 使用 OpenAI-compatible 配置。
-3. 仍失败请联系管理员更换 Key。
+3. 执行 `codex app-server daemon restart` 后再试。
+4. 仍失败请联系管理员更换 Key。
 
 ---
 

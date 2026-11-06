@@ -17,12 +17,15 @@
 | 平台 | 用户入口 | 实际主脚本 | 说明 |
 | --- | --- | --- | --- |
 | Linux | `install-codex-cli-linux.sh` | 同文件 | 安装 nvm LTS、Codex、CRS、NO_PROXY。`run-install.cmd` 只是在 Windows 中提示复制到 Linux/WSL 后运行。 |
+| Linux app-server 重启 | `restart-codex-app-server-linux.sh` | 同文件 | 仅手动执行当前 Linux 环境的 `codex app-server daemon restart`，随后检查 `codex app-server daemon version`。 |
 | macOS | `install-codex-cli-mac.sh` | 同文件 | 安装或复用 Homebrew `node@24`，安装 Codex、CRS、NO_PROXY。 |
+| macOS app-server 重启 | `restart-codex-app-server-mac.sh` | 同文件 | 仅手动执行当前 macOS 环境的 `codex app-server daemon restart`，随后检查 `codex app-server daemon version`。 |
 | Windows | `install-codex-cli.cmd` | `install-codex-cli-and-setup-no-proxy.ps1` -> `install-codex-cli.ps1` + `setup_no_proxy_windows.ps1` | `.cmd` 负责用 `-ExecutionPolicy Bypass` 启动组合安装流程。 |
 | Linux 卸载 | `uninstall-codex-cli-and-node-npm-linux.sh` | 同文件 | 先卸载 Codex CLI，再按归属判断是否清理 Node.js/npm。 |
 | macOS 卸载 | `uninstall-codex-cli-and-node-npm-mac.sh` | 同文件 | 先卸载 Codex CLI，再按归属判断是否清理 Node.js/npm。 |
 | Windows 卸载 | `uninstall-codex-cli-and-node-npm.cmd` | `uninstall-codex-cli-and-node-npm.ps1` | `.cmd` 负责用 `-ExecutionPolicy Bypass` 启动卸载流程，并在结束时暂停显示退出码。 |
 | Windows 修复 | `check-and-repair-codex-env.cmd` | `check-and-repair-codex-env.ps1` | 安装后 PATH、执行策略、`codex.cmd`、PowerShell shim 等问题优先看这里。 |
+| Windows app-server 重启 | `restart-codex-app-server.cmd` | `restart-codex-app-server.ps1` | 仅手动执行 `codex app-server daemon restart`，随后检查 `codex app-server daemon version`；不启动后台 watchdog。 |
 | VC++ 运行库 | `install-vc-redist-x64.cmd` | `install-vc-redist-x64.ps1` | Windows Codex 原生二进制缺 DLL 时使用。 |
 
 ## 共享模块
@@ -73,6 +76,44 @@
 8. 写入用户 PATH，探测 `codex.cmd`、普通 PowerShell、`PowerShell -NoProfile`。
 9. 写入 CRS 配置和 `auth.json`。
 10. 组合包装器调用 `setup_no_proxy_windows.ps1`，按 CRS `base_url` 写入用户级 NO_PROXY。
+
+### Windows app-server 手动重启
+
+`Codex-windows一键安装包/restart-codex-app-server.ps1` 是独立的手动维护入口，按当前进程 `CODEX_HOME`、当前用户持久化 `CODEX_HOME`、`%USERPROFILE%\.codex` 的顺序解析配置目录，只为本次 Codex 子进程设置 `CODEX_HOME`。脚本优先使用当前 PowerShell 实际解析到的 `codex.cmd` 或 Codex npm bin 路径，先输出 Codex 版本，再经确认执行：
+
+```powershell
+codex app-server daemon restart
+codex app-server daemon version
+```
+
+直接运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-server.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-server.ps1 -Force
+```
+
+命令提示符入口为 `restart-codex-app-server.cmd`。更新 `auth.json` 或重新登录、修改 `provider`/`base_url`/`env_key` 等配置、CLI 正常但 app-server 子模块返回 401，或 daemon 状态异常时，应显式重启；重启可能中断正在运行的 app-server 任务。普通 CLI 新进程可能会重新读取配置；为了确保已经运行的 app-server 使用新配置或新认证，应显式执行 app-server daemon restart。
+
+该入口不杀掉所有 Codex 进程，不修改 `config.toml`、`auth.json`、PATH 或 NO_PROXY，也不调用 WSL。WSL daemon 必须在 WSL 内单独执行：
+
+```powershell
+wsl.exe -- sh -lc 'codex app-server daemon restart'
+wsl.exe -- sh -lc 'codex app-server daemon version'
+```
+
+### Linux/macOS app-server 手动重启
+
+Linux 和 macOS 使用各自安装包目录中的原生 Bash 入口：
+
+```bash
+bash ./Codex-Linux-一键安装包/restart-codex-app-server-linux.sh
+bash ./Codex-Linux-一键安装包/restart-codex-app-server-linux.sh --force
+bash ./Codex-Mac-一键安装包/restart-codex-app-server-mac.sh
+bash ./Codex-Mac-一键安装包/restart-codex-app-server-mac.sh --force
+```
+
+这些脚本不会调用 Windows `.ps1` 或 WSL；每个脚本只管理它运行所在的平台环境。
 
 ## CRS 配置
 
@@ -135,6 +176,9 @@
 | macOS 安装失败 | `Codex-Mac-一键安装包/install-codex-cli-mac.sh` 的 `ensure_node_npm`、`configure_node24_runtime`、`ensure_codex` |
 | Windows 安装失败 | `Codex-windows一键安装包/install-codex-cli.ps1` 的 `Initialize-CodexPathSettings`、`Ensure-Node`、`Ensure-Codex` |
 | Windows 安装后 `codex` 不可用 | `Codex-windows一键安装包/check-and-repair-codex-env.ps1` |
+| Windows app-server 认证或 daemon 状态异常 | `Codex-windows一键安装包/restart-codex-app-server.ps1`；随后检查 `codex login status`、`codex app-server daemon version`、`CODEX_HOME`、`config.toml`、`auth.json` |
+| Linux app-server 认证或 daemon 状态异常 | `Codex-Linux-一键安装包/restart-codex-app-server-linux.sh` |
+| macOS app-server 认证或 daemon 状态异常 | `Codex-Mac-一键安装包/restart-codex-app-server-mac.sh` |
 | 独立 Node/npm 安装或卸载 | `Node和npm安装和卸载脚本/`，流程见 `docs/graphs/node-npm.drawio` |
 | Windows DLL 缺失 | `install-vc-redist-x64.*`，并查看 `Get-CodexRuntimeHint` |
 | CRS 不通 | 三平台主安装脚本中的 `Resolve-CrsBaseUrl` / `resolve_crs_base_url` |
