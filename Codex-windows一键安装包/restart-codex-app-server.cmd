@@ -10,4 +10,6 @@ if "%EXIT_CODE%"=="0" (
   echo [ERROR] restart-codex-app-server failed with exit code %EXIT_CODE%.
 )
 echo [INFO] Exit code: %EXIT_CODE%
+echo Press any key to close this window...
+pause >nul
 exit /b %EXIT_CODE%

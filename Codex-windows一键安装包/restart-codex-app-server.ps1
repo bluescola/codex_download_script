@@ -5,11 +5,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if ([string]::IsNullOrWhiteSpace($env:CRS_OAI_KEY)) {
-    Write-Host '[ERROR] CRS_OAI_KEY 未设置' -ForegroundColor Red
-    exit 1
-}
-
 $loggingModule = Join-Path (Split-Path -Parent $PSScriptRoot) 'script-modules\logging\logging.ps1'
 if (Test-Path -LiteralPath $loggingModule -PathType Leaf) {
     . $loggingModule
@@ -252,7 +247,6 @@ function Invoke-DaemonCommand {
 
 function Write-TroubleshootingHints {
     Write-WarnMsg '命令失败时，请分别检查：'
-    Write-Host '  CRS_OAI_KEY'
     Write-Host '  codex login status'
     Write-Host '  codex app-server daemon version'
     Write-Host '  CODEX_HOME'

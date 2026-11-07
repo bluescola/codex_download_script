@@ -9,6 +9,7 @@
 - Windows 安装包：`Codex-windows一键安装包/`
 - 独立 NO_PROXY 工具：`codex绕过代理配置/`
 - 独立 Node/npm 工具：`Node和npm安装和卸载脚本/`
+- OpenCode 2 安装包：`opencode-一键安装包/`
 - 共享脚本模块：`script-modules/`
 - 维护文档：`docs/`
 
@@ -25,8 +26,11 @@
 | macOS 卸载 | `uninstall-codex-cli-and-node-npm-mac.sh` | 同文件 | 先卸载 Codex CLI，再按归属判断是否清理 Node.js/npm。 |
 | Windows 卸载 | `uninstall-codex-cli-and-node-npm.cmd` | `uninstall-codex-cli-and-node-npm.ps1` | `.cmd` 负责用 `-ExecutionPolicy Bypass` 启动卸载流程，并在结束时暂停显示退出码。 |
 | Windows 修复 | `check-and-repair-codex-env.cmd` | `check-and-repair-codex-env.ps1` | 安装后 PATH、执行策略、`codex.cmd`、PowerShell shim 等问题优先看这里。 |
-| Windows app-server 重启 | `restart-codex-app-server.cmd` | `restart-codex-app-server.ps1` | 要求当前 PowerShell 已设置 `CRS_OAI_KEY`；停止并重新启动 daemon，随后检查 `codex app-server daemon version`；不启动后台 watchdog。 |
+| Windows app-server 重启 | `restart-codex-app-server.cmd` | `restart-codex-app-server.ps1` | 使用现有 `auth.json` 认证；停止并重新启动 daemon，随后检查 `codex app-server daemon version`；不启动后台 watchdog。 |
 | VC++ 运行库 | `install-vc-redist-x64.cmd` | `install-vc-redist-x64.ps1` | Windows Codex 原生二进制缺 DLL 时使用。 |
+| OpenCode Linux | `opencode-一键安装包/linux/install-opencode-linux.sh` | `opencode-一键安装包/shared/install-opencode.sh` | 检查系统并安装 Node.js LTS 与 `@opencode/cli`。 |
+| OpenCode macOS | `opencode-一键安装包/mac/install-opencode-mac.sh` | `opencode-一键安装包/shared/install-opencode.sh` | 检查系统并通过 Homebrew 安装 Node.js 与 `@opencode/cli`。 |
+| OpenCode Windows | `opencode-一键安装包/windows/install-opencode.cmd` 或同目录的 `.ps1` | `opencode-一键安装包/windows/install-opencode.ps1` | 安装 Node.js LTS 与 `@opencode/cli`；详情见 `opencode-一键安装包/README.md`。 |
 
 ## 共享模块
 
@@ -94,7 +98,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-serv
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\restart-codex-app-server.ps1 -Force
 ```
 
-命令提示符入口为 `restart-codex-app-server.cmd`。执行前必须在当前 shell 设置 Sub2API 客户端 key：`$env:CRS_OAI_KEY = '你的 Sub2API 客户端 API Key'`。该 key 必须来自 Sub2API 客户端配置，不是上游 OpenAI 账号凭据。更新 `auth.json` 或重新登录、修改 `provider`/`base_url`/`env_key` 等配置、CLI 正常但 app-server 子模块返回 401，或 daemon 状态异常时，应显式停止后重新启动；重启可能中断正在运行的 app-server 任务。脚本会把当前 shell 的 key 传给新 daemon。
+命令提示符入口为 `restart-codex-app-server.cmd`。本安装包把 Sub2API 客户端 Key 写入 `auth.json` 的 `OPENAI_API_KEY` 字段，重启脚本不额外要求 `CRS_OAI_KEY`；自定义配置若使用 `env_key`，需在运行脚本的环境中设置对应变量。更新 `auth.json` 或重新登录、修改 `provider`/`base_url`/`env_key` 等配置、CLI 正常但 app-server 子模块返回 401，或 daemon 状态异常时，应显式停止后重新启动；重启可能中断正在运行的 app-server 任务。
 
 该入口不杀掉所有 Codex 进程，不修改 `config.toml`、`auth.json`、PATH 或 NO_PROXY，也不调用 WSL。WSL daemon 必须在 WSL 内单独执行：
 
