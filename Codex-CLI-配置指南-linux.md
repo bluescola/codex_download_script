@@ -295,7 +295,7 @@ model_reasoning_effort = "medium"
 # model = "gpt-5.5"
 ```
 
-普通 CLI 新进程可能会重新读取配置；为了确保已经运行的 app-server 使用当前 Sub2API key，应在当前 shell 设置 `CRS_OAI_KEY`，再显式停止并启动当前 Linux 环境的 app-server daemon。
+普通 CLI 新进程可能会重新读取配置；为了确保已经运行的 app-server 使用 `auth.json` 中的当前 `OPENAI_API_KEY`，应显式停止并启动当前 Linux 环境的 app-server daemon。
 
 ### 手动重启 app-server
 
@@ -309,13 +309,7 @@ bash ./Codex-Linux-一键安装包/restart-codex-app-server-linux.sh
 bash ./Codex-Linux-一键安装包/restart-codex-app-server-linux.sh --force
 ```
 
-执行前：
-
-```bash
-export CRS_OAI_KEY='你的 Sub2API 客户端 API Key'
-```
-
-脚本会执行 `codex app-server daemon stop`、`codex app-server daemon start` 和 `codex app-server daemon version`，并在 Linux 上验证新进程环境中的 `CRS_OAI_KEY`。该 key 必须是 Sub2API 客户端 Key，不是上游 OpenAI 账号凭据。
+脚本会执行 `codex app-server daemon stop`、`codex app-server daemon start` 和 `codex app-server daemon version`。本安装包的 Key 保存在 `auth.json` 的 `OPENAI_API_KEY` 字段中，无需设置 `CRS_OAI_KEY`。仅当自定义配置使用 `env_key` 时，才需要在运行脚本的环境中设置对应变量。
 
 验证：
 

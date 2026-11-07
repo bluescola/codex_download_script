@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${CRS_OAI_KEY:-}" ]]; then
-  printf '%s\n' '[ERROR] CRS_OAI_KEY 未设置' >&2
-  exit 1
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOGGING_MODULE="$REPO_ROOT/script-modules/logging/logging.sh"
@@ -73,7 +68,7 @@ CODEX_COMMAND="$(type -P codex 2>/dev/null || true)"
 if [[ -z "$CODEX_COMMAND" || ! -x "$CODEX_COMMAND" ]]; then
   log_error '找不到 codex 命令。请确认 Codex CLI 已安装且当前 shell 的 PATH 已加载。'
   log_warn '命令失败时，请分别检查：'
-  printf '%s\n' '  CRS_OAI_KEY' '  codex login status' '  codex app-server daemon version' '  CODEX_HOME' '  config.toml' '  auth.json'
+  printf '%s\n' '  codex login status' '  codex app-server daemon version' '  CODEX_HOME' '  config.toml' '  auth.json'
   exit 1
 fi
 log_info "Codex 命令路径: $CODEX_COMMAND"
@@ -82,7 +77,7 @@ CODEX_OUTPUT=''
 CODEX_EXIT_CODE=0
 invoke_codex() {
   set +e
-  CODEX_OUTPUT="$(CRS_OAI_KEY="$CRS_OAI_KEY" CODEX_HOME="$CODEX_HOME_DIR" "$CODEX_COMMAND" "$@" 2>&1)"
+  CODEX_OUTPUT="$(CODEX_HOME="$CODEX_HOME_DIR" "$CODEX_COMMAND" "$@" 2>&1)"
   CODEX_EXIT_CODE=$?
   set -e
 }

@@ -18,9 +18,9 @@
 | 平台 | 用户入口 | 实际主脚本 | 说明 |
 | --- | --- | --- | --- |
 | Linux | `install-codex-cli-linux.sh` | 同文件 | 安装 nvm LTS、Codex、CRS、NO_PROXY。`run-install.cmd` 只是在 Windows 中提示复制到 Linux/WSL 后运行。 |
-| Linux app-server 重启 | `restart-codex-app-server-linux.sh` | 同文件 | 要求当前 shell 已设置 `CRS_OAI_KEY`；停止并重新启动当前 Linux 环境的 daemon，检查版本并验证 app-server 进程环境。 |
+| Linux app-server 重启 | `restart-codex-app-server-linux.sh` | 同文件 | 使用现有 `auth.json` 认证；停止并重新启动当前 Linux 环境的 daemon，随后检查版本。 |
 | macOS | `install-codex-cli-mac.sh` | 同文件 | 安装或复用 Homebrew `node@24`，安装 Codex、CRS、NO_PROXY。 |
-| macOS app-server 重启 | `restart-codex-app-server-mac.sh` | 同文件 | 要求当前 shell 已设置 `CRS_OAI_KEY`；停止并重新启动当前 macOS 环境的 daemon，随后检查版本。 |
+| macOS app-server 重启 | `restart-codex-app-server-mac.sh` | 同文件 | 使用现有 `auth.json` 认证；停止并重新启动当前 macOS 环境的 daemon，随后检查版本。 |
 | Windows | `install-codex-cli.cmd` | `install-codex-cli-and-setup-no-proxy.ps1` -> `install-codex-cli.ps1` + `setup_no_proxy_windows.ps1` | `.cmd` 负责用 `-ExecutionPolicy Bypass` 启动组合安装流程。 |
 | Linux 卸载 | `uninstall-codex-cli-and-node-npm-linux.sh` | 同文件 | 先卸载 Codex CLI，再按归属判断是否清理 Node.js/npm。 |
 | macOS 卸载 | `uninstall-codex-cli-and-node-npm-mac.sh` | 同文件 | 先卸载 Codex CLI，再按归属判断是否清理 Node.js/npm。 |
@@ -119,13 +119,7 @@ bash ./Codex-Mac-一键安装包/restart-codex-app-server-mac.sh
 bash ./Codex-Mac-一键安装包/restart-codex-app-server-mac.sh --force
 ```
 
-执行前先在当前 shell 设置 Sub2API 客户端 key：
-
-```bash
-export CRS_OAI_KEY='你的 Sub2API 客户端 API Key'
-```
-
-该 key 必须来自 Sub2API 客户端配置，不是上游 OpenAI 账号凭据。Linux 脚本会在启动后读取 `/proc/<pid>/environ`，确认 `codex app-server --listen` 进程继承了当前 key；缺少 key、daemon stop/start、版本检查或进程环境验证任一步失败，脚本都会退出失败。这些脚本不会调用 Windows `.ps1` 或 WSL；每个脚本只管理它运行所在的平台环境。
+本安装包把 Sub2API 客户端 Key 写入 `auth.json` 的 `OPENAI_API_KEY` 字段，重启脚本不额外要求 `CRS_OAI_KEY`；自定义配置若使用 `env_key`，需在运行脚本的环境中设置对应变量。daemon stop/start 或版本检查失败时脚本会退出失败。这些脚本不会调用 Windows `.ps1` 或 WSL；每个脚本只管理它运行所在的平台环境。
 
 ## CRS 配置
 

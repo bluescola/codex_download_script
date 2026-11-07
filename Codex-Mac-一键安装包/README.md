@@ -44,13 +44,9 @@ bash restart-codex-app-server-mac.sh
 bash restart-codex-app-server-mac.sh --force
 ```
 
-执行前必须设置当前 shell 的 Sub2API 客户端 key：
+本安装包将 Sub2API 客户端 Key 保存在 `CODEX_HOME/auth.json` 的 `OPENAI_API_KEY` 字段中，重启时无需再输入 Key。若自行在 `config.toml` 配置了 `env_key`，需要在运行脚本的环境中设置该字段指定的变量。
 
-```bash
-export CRS_OAI_KEY='你的 Sub2API 客户端 API Key'
-```
-
-脚本会停止旧 daemon，再启动新 daemon，并检查 daemon 版本。该 key 必须是 Sub2API 中生成的客户端 Key，不是上游 OpenAI 账号凭据。
+脚本会停止旧 daemon，再启动新 daemon，并检查 daemon 版本。
 
 验证：
 

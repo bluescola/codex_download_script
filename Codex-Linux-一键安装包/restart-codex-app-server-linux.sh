@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${CRS_OAI_KEY:-}" ]]; then
-  printf '%s\n' '[ERROR] CRS_OAI_KEY 未设置' >&2
-  exit 1
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOGGING_MODULE="$REPO_ROOT/script-modules/logging/logging.sh"
@@ -73,7 +68,7 @@ CODEX_COMMAND="$(type -P codex 2>/dev/null || true)"
 if [[ -z "$CODEX_COMMAND" || ! -x "$CODEX_COMMAND" ]]; then
   log_error '找不到 codex 命令。请确认 Codex CLI 已安装且当前 shell 的 PATH 已加载。'
   log_warn '命令失败时，请分别检查：'
-  printf '%s\n' '  CRS_OAI_KEY' '  codex login status' '  codex app-server daemon version' '  CODEX_HOME' '  config.toml' '  auth.json'
+  printf '%s\n' '  codex login status' '  codex app-server daemon version' '  CODEX_HOME' '  config.toml' '  auth.json'
   exit 1
 fi
 log_info "Codex 命令路径: $CODEX_COMMAND"
@@ -82,7 +77,7 @@ CODEX_OUTPUT=''
 CODEX_EXIT_CODE=0
 invoke_codex() {
   set +e
-  CODEX_OUTPUT="$(CRS_OAI_KEY="$CRS_OAI_KEY" CODEX_HOME="$CODEX_HOME_DIR" "$CODEX_COMMAND" "$@" 2>&1)"
+  CODEX_OUTPUT="$(CODEX_HOME="$CODEX_HOME_DIR" "$CODEX_COMMAND" "$@" 2>&1)"
   CODEX_EXIT_CODE=$?
   set -e
 }
@@ -113,27 +108,6 @@ run_daemon_command() {
     print_failure_hints
     exit 1
   fi
-}
-
-verify_linux_app_server_environment() {
-  local pid=''
-  local attempt
-
-  for attempt in {1..20}; do
-    pid="$(pgrep -f 'codex app-server --listen' | head -n1 || true)"
-    if [[ -n "$pid" ]] && [[ -r "/proc/$pid/environ" ]] && tr '\0' '\n' < "/proc/$pid/environ" | grep -F -x -q -- "CRS_OAI_KEY=$CRS_OAI_KEY"; then
-      log_ok "CRS_OAI_KEY 已传入 app-server（PID: $pid，值已隐藏）。"
-      return 0
-    fi
-    sleep 0.5
-  done
-
-  if [[ -z "$pid" ]]; then
-    log_error "未找到 codex app-server --listen 进程，无法验证 CRS_OAI_KEY。"
-  else
-    log_error "CRS_OAI_KEY 未传入 app-server（PID: $pid）。"
-  fi
-  return 1
 }
 
 invoke_codex --version
@@ -167,4 +141,3 @@ if [[ "$CODEX_EXIT_CODE" -ne 0 || -z "$CODEX_OUTPUT" ]]; then
   exit 1
 fi
 log_ok 'app-server daemon version 检查通过。'
-verify_linux_app_server_environment
